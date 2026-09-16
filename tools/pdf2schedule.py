@@ -431,13 +431,17 @@ def parse_page(items: list, content: str, norm: Normaliser, report: Report):
         subject_raw = joined("subject")
         if not subject_raw.strip():
             continue
-        lessons.append({
-            "d": r,
-            "p": c + 1,
-            "subject": norm.subject(subject_raw),
-            "teacher": norm.teacher(joined("teacher", " ")),
-            "room": norm.room(joined("room", " ").strip()),
-        })
+        # Omit empty fields rather than writing nulls: it keeps the file small
+        # and quick to parse on an old phone. The app already treats a missing
+        # teacher or room the same as a null one.
+        lesson = {"d": r, "p": c + 1, "subject": norm.subject(subject_raw)}
+        teacher = norm.teacher(joined("teacher", " "))
+        if teacher:
+            lesson["teacher"] = teacher
+        room = norm.room(joined("room", " ").strip())
+        if room:
+            lesson["room"] = room
+        lessons.append(lesson)
     return label, lessons, periods
 
 
@@ -490,16 +494,17 @@ def build(pdf_path: str, args) -> tuple:
             report.excluded.append(label)
         elif not lessons:
             report.empty.append(label)
-        groups[label] = {
+        group = {
             "label": label,
             "grade": info.get("grade"),
             "kind": info.get("kind", "extra"),
-            "track": info.get("track"),
-            "name": info.get("name"),
-            "parent": info.get("parent"),
             "hidden": excluded or not lessons,
             "lessons": lessons,
         }
+        for key in ("track", "name", "parent"):
+            if info.get(key):
+                group[key] = info[key]
+        groups[label] = group
 
     if not groups:
         raise ConversionError("no timetable pages recognised — is this an aSc export?")
@@ -527,7 +532,7 @@ def build(pdf_path: str, args) -> tuple:
     short = {k: v for k, v in aliases["subjectShort"].items() if not k.startswith("_")}
     used_subjects = {l["subject"] for g in groups.values() for l in g["lessons"]}
     rooms = {k: v for k, v in aliases["rooms"].items() if not k.startswith("_")}
-    used_rooms = {l["room"] for g in groups.values() for l in g["lessons"] if l["room"]}
+    used_rooms = {l["room"] for g in groups.values() for l in g["lessons"] if l.get("room")}
 
     schedule = {
         "schemaVersion": SCHEMA_VERSION,

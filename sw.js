@@ -3,7 +3,7 @@
    Bump APP_VERSION whenever you change any shell file — the cache name derives
    from it, so a new version installs cleanly and the old one is swept away. */
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const SHELL_CACHE = `gel7-shell-${APP_VERSION}`;
 const DATA_CACHE = 'gel7-data';
 const DATA_TIMEOUT_MS = 3000;
@@ -53,7 +53,9 @@ async function networkFirst(request) {
   const cache = await caches.open(DATA_CACHE);
   try {
     const response = await Promise.race([
-      fetch(request, { cache: 'no-store' }),
+      // 'no-cache' revalidates but lets an unchanged file answer from the HTTP
+      // cache, so a repeat check transfers headers only.
+      fetch(request, { cache: 'no-cache' }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DATA_TIMEOUT_MS)),
     ]);
     if (response && response.ok) {

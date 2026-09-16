@@ -144,7 +144,7 @@ def main(path):
 
     @check("rooms referenced by lessons are all described")
     def _():
-        used = {l["room"] for g in groups.values() for l in g["lessons"] if l["room"]}
+        used = {l["room"] for g in groups.values() for l in g["lessons"] if l.get("room")}
         missing = used - set(data.get("rooms", {}))
         assert not missing, "no description for %s" % ", ".join(sorted(missing))
 

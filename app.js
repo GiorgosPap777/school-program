@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -20,6 +20,12 @@ const SCHEMA_VERSION = 1;
 const KEY_SELECTION = 'gel7.selection.v1';
 const KEY_SCHEDULE = 'gel7.schedule.v1';
 const KEY_DISMISSED = 'gel7.dismissed.v1';
+const KEY_LAST_CHECK = 'gel7.lastcheck.v1';
+
+/* Background checks are cheap (a 304 is header-only) but not free, and a student
+   switches back into the app dozens of times a day. Once every half hour is
+   plenty for a schedule that changes a handful of times a year. */
+const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
 const DAY_SHORT = ['Δευ', 'Τρί', 'Τετ', 'Πέμ', 'Παρ', 'Σάβ', 'Κυρ'];
 
@@ -160,7 +166,10 @@ function tagged(kind, message) {
 async function fetchSchedule(url) {
   let res;
   try {
-    res = await fetch(url, { cache: 'no-store' });
+    // 'no-cache' still revalidates on every call, but sends If-None-Match, so an
+    // unchanged schedule comes back as a 304 with no body instead of ~7 KB.
+    // 'no-store' would skip the validator entirely and re-download every time.
+    res = await fetch(url, { cache: 'no-cache' });
   } catch (err) {
     throw tagged('network', err.message);
   }
@@ -179,28 +188,25 @@ async function fetchSchedule(url) {
   }
 }
 
-/** Pick the newest of: what we stored last time, and what shipped with this build. */
+/** The schedule to start from, and whether that already cost a network round
+    trip to REMOTE_SCHEDULE_URL (so boot can skip an immediate duplicate check).
+
+    A stored copy is used as-is: it renders instantly with no network at all, and
+    the background update check picks up anything newer a moment later. */
 async function loadInitialSchedule() {
-  let stored = null;
   try {
     const raw = load(KEY_SCHEDULE, null);
-    if (raw) stored = validateSchedule(raw);
+    if (raw) return { schedule: validateSchedule(raw), fetchedRemote: false };
   } catch (err) {
     localStorage.removeItem(KEY_SCHEDULE);
   }
 
-  let bundled = null;
-  try {
-    bundled = await fetchSchedule(BUNDLED_SCHEDULE_URL);
-  } catch (err) {
-    if (!stored) throw err;
-  }
-
-  if (bundled && isNewer(bundled, stored)) {
-    save(KEY_SCHEDULE, bundled);
-    return bundled;
-  }
-  return stored || bundled;
+  const bundled = await fetchSchedule(BUNDLED_SCHEDULE_URL);
+  save(KEY_SCHEDULE, bundled);
+  return {
+    schedule: bundled,
+    fetchedRemote: BUNDLED_SCHEDULE_URL === REMOTE_SCHEDULE_URL,
+  };
 }
 
 /* ------------------------------------------------------------------- merging */
@@ -726,9 +732,14 @@ let checking = false;
 
 async function checkForUpdate({ silent }) {
   if (checking) return;
+  if (silent) {
+    const last = Number(load(KEY_LAST_CHECK, 0)) || 0;
+    if (Date.now() - last < CHECK_INTERVAL_MS) return;
+  }
   checking = true;
   try {
     const candidate = await fetchSchedule(REMOTE_SCHEDULE_URL);
+    save(KEY_LAST_CHECK, Date.now());
     if (!isNewer(candidate, state.schedule)) {
       if (!silent) banner({ id: 'uptodate', text: 'Το πρόγραμμα είναι ενημερωμένο.' });
       return;
@@ -935,8 +946,11 @@ async function boot() {
   setupInstall();
   registerServiceWorker();
 
+  let fetchedRemote = false;
   try {
-    state.schedule = await loadInitialSchedule();
+    const initial = await loadInitialSchedule();
+    state.schedule = initial.schedule;
+    fetchedRemote = initial.fetchedRemote;
   } catch (err) {
     $('main').innerHTML =
       `<p class="empty">Δεν ήταν δυνατή η φόρτωση του προγράμματος.<br>${esc(err.message)}</p>`;
@@ -953,7 +967,8 @@ async function boot() {
 
   setView('today');
   startTicking();
-  checkForUpdate({ silent: true });
+  // Skip the check when the bundle we just fetched *is* the remote file.
+  if (!fetchedRemote) checkForUpdate({ silent: true });
 }
 
 boot();

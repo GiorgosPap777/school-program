@@ -212,6 +212,36 @@ app keeps **both** and marks the slot «Σύγκρουση» rather than silentl
 
 ---
 
+## Bandwidth
+
+Sized for a slow home uplink, because that is what this usually ships from.
+Measured against the container with gzip on:
+
+| What | Bytes on the wire |
+|---|---|
+| First install (whole app + schedule) | **39 KB** |
+| Returning student, app already installed | **~900 B** (three 304s) |
+| Background update check, nothing new | **~300 B** |
+| The day a new schedule is published | **~6 KB** |
+
+At 5 Mbit/s up (~537 KB/s usable), 600 students all opening the app on the same
+morning costs about **one second** of uplink. A whole school installing it for the
+first time simultaneously is ~44 s — and that never happens at once in practice.
+
+Three things keep it there, all of which are easy to undo by accident:
+
+- **`fetch(..., { cache: 'no-cache' })`, never `'no-store'`.** `no-store` skips the
+  validator and re-downloads the full schedule on every check; `no-cache` still
+  revalidates every time but lets an unchanged file answer `304` with no body.
+  That one word is a 20× difference on the hot path.
+- **One schedule request per load.** A stored schedule renders straight from
+  `localStorage` with no network at all; the background check is what goes out.
+- **Background checks are throttled** to once per `CHECK_INTERVAL_MS` (30 min).
+  The «Έλεγχος για νέο πρόγραμμα» button ignores the throttle.
+
+Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 73 KB raw and
+6.5 KB gzipped, so serving it uncompressed costs 11× more.
+
 ## Testing
 
 ```bash
