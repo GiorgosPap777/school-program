@@ -11,7 +11,8 @@ FROM nginx:1.29-alpine
 LABEL org.opencontainers.image.title="Ωρολόγιο Πρόγραμμα — 7ο ΓΕΛ Ηρακλείου" \
       org.opencontainers.image.description="Mobile-first PWA that merges a Greek high school student's section, orientation track and electives into one live timetable."
 
-RUN rm /etc/nginx/conf.d/default.conf
+# No RUN instructions anywhere in this file: the build is pure COPY, so it
+# cross-builds for arm64 without QEMU emulation.
 COPY docker/default.conf /etc/nginx/conf.d/default.conf
 
 WORKDIR /usr/share/nginx/html

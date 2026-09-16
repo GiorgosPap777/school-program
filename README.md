@@ -42,10 +42,22 @@ docker run -d -p 127.0.0.1:8080:80 \
   giorgospap777/school-program
 ```
 
+The published image is multi-arch (`linux/amd64` + `linux/arm64`), so it runs on
+a normal server or on a Raspberry Pi / ARM VPS without changes. The repository is
+private, so the host needs `docker login` before it can pull.
+
 Rebuild after a schedule import with:
 
 ```bash
 docker build -t giorgospap777/school-program .
+```
+
+To publish both architectures (the Dockerfile has no `RUN` steps, so this
+cross-builds with no emulation):
+
+```bash
+docker buildx create --name multiarch --driver docker-container --use
+docker buildx build --platform linux/amd64,linux/arm64 -t giorgospap777/school-program:latest --push .
 ```
 
 ### Deploying behind a reverse proxy
