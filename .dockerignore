@@ -1,0 +1,9 @@
+# Only the served app goes in the image.
+.git
+.gitignore
+tools/
+data/report.txt
+README.md
+docker-compose.yml
+*.pdf
+*.md

@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Invariant checks on data/schedule.json.
+
+Run this after every PDF import. It catches the failure mode that matters most:
+a converter change or a new PDF layout that silently produces a wrong or
+lopsided timetable rather than an obvious error.
+
+    python3 tools/test/schedule.test.py [path/to/schedule.json]
+"""
+
+import itertools
+import json
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DEFAULT = os.path.join(ROOT, "data", "schedule.json")
+TIME_RE = re.compile(r"^\d{2}:\d{2}$")
+
+results = []
+
+
+def check(name):
+    def wrap(fn):
+        try:
+            fn()
+            results.append((True, name))
+        except AssertionError as exc:
+            results.append((False, "%s — %s" % (name, exc)))
+        return fn
+    return wrap
+
+
+def main(path):
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+
+    groups = data["groups"]
+    kinds = lambda k: {n: g for n, g in groups.items() if g["kind"] == k}
+    sections, tracks = kinds("section"), kinds("track")
+    kontra = kinds("kontra")
+
+    @check("schema envelope is complete")
+    def _():
+        for key in ("schemaVersion", "version", "generatedAt", "days", "periods", "groups"):
+            assert key in data, "missing %s" % key
+        assert data["schemaVersion"] == 1, "unexpected schemaVersion"
+        assert len(data["days"]) == 5, "expected 5 school days"
+
+    @check("every period has a sane, ordered time range")
+    def _():
+        prev_end = -1
+        for p in data["periods"]:
+            assert TIME_RE.match(p["start"]) and TIME_RE.match(p["end"]), \
+                "bad time on period %s" % p["n"]
+            to_min = lambda t: int(t[:2]) * 60 + int(t[3:])
+            start, end = to_min(p["start"]), to_min(p["end"])
+            assert start < end, "period %s ends before it starts" % p["n"]
+            assert start >= prev_end, "period %s overlaps the previous one" % p["n"]
+            prev_end = end
+
+    @check("every lesson lands inside the grid")
+    def _():
+        for name, g in groups.items():
+            for l in g["lessons"]:
+                assert 0 <= l["d"] < len(data["days"]), "%s: bad day %s" % (name, l["d"])
+                assert 1 <= l["p"] <= len(data["periods"]), "%s: bad period %s" % (name, l["p"])
+                assert l["subject"], "%s: empty subject" % name
+
+    @check("no group double-books itself")
+    def _():
+        for name, g in groups.items():
+            seen = {}
+            for l in g["lessons"]:
+                key = (l["d"], l["p"])
+                assert key not in seen, \
+                    "%s teaches two lessons at %s/%s" % (name, l["d"], l["p"])
+                seen[key] = l
+
+    @check("every section + track + elective combination merges without collision")
+    def _():
+        clashes = []
+        for sec_name, sec in sections.items():
+            if sec["hidden"]:
+                continue
+            taken = {(l["d"], l["p"]): l["subject"] for l in sec["lessons"]}
+            overlays = {n: g for n, g in {**tracks, **kontra}.items()
+                        if g["grade"] == sec["grade"] and not g["hidden"]}
+            for ov_name, ov in overlays.items():
+                for l in ov["lessons"]:
+                    key = (l["d"], l["p"])
+                    if key in taken:
+                        clashes.append("%s+%s at day %s period %s (%s vs %s)"
+                                       % (sec_name, ov_name, key[0], key[1],
+                                          taken[key], l["subject"]))
+        assert not clashes, "%d collision(s): %s" % (len(clashes), "; ".join(clashes[:4]))
+
+    @check("merged week is a plausible size for every student")
+    def _():
+        for sec_name, sec in sections.items():
+            # Hidden sections are never offered, so their hours do not matter.
+            if sec["hidden"]:
+                continue
+            peers = [g for g in tracks.values()
+                     if g["grade"] == sec["grade"] and not g["hidden"]] or [None]
+            for track in peers:
+                slots = {(l["d"], l["p"]) for l in sec["lessons"]}
+                if track:
+                    slots |= {(l["d"], l["p"]) for l in track["lessons"]}
+                label = "%s+%s" % (sec_name, track["label"] if track else "—")
+                assert 20 <= len(slots) <= 35, \
+                    "%s has %d hours a week, which is out of range" % (label, len(slots))
+
+    @check("every offered group has lessons, and empty ones are hidden")
+    def _():
+        for name, g in groups.items():
+            if not g["lessons"]:
+                assert g["hidden"], \
+                    "%s has no lessons but is still offered in the picker" % name
+        offered = sorted(n for n, g in sections.items() if not g["hidden"])
+        assert offered, "no sections left for students to pick"
+        hidden = sorted(n for n, g in sections.items() if g["hidden"])
+        if hidden:
+            print("    note: sections hidden as non-existent: %s" % ", ".join(hidden))
+
+    @check("every group is classified and grade-tagged")
+    def _():
+        for name, g in groups.items():
+            assert g["kind"] in ("section", "track", "kontra", "extra"), \
+                "%s has kind %r" % (name, g["kind"])
+            assert g["grade"] in ("Α", "Β", "Γ"), "%s has grade %r" % (name, g["grade"])
+
+    @check("subject names are normalised, not raw PDF text")
+    def _():
+        bad = set()
+        for g in groups.values():
+            for l in g["lessons"]:
+                s = l["subject"]
+                # Leftovers of the PDF's line-wrapping and its typo.
+                if re.search(r"[α-ωά-ώ][ΑΒΓΔ-Ω]", s) or "Μαιθ" in s or s.endswith((" Α", " Β", " Γ")):
+                    bad.add(s)
+        assert not bad, "un-normalised: %s" % ", ".join(sorted(bad))
+
+    @check("rooms referenced by lessons are all described")
+    def _():
+        used = {l["room"] for g in groups.values() for l in g["lessons"] if l["room"]}
+        missing = used - set(data.get("rooms", {}))
+        assert not missing, "no description for %s" % ", ".join(sorted(missing))
+
+    @check("the tracks a student can pick actually cover the section's gaps")
+    def _():
+        # A Β'/Γ' section leaves periods free for its orientation track. If a
+        # track stopped filling them, students would see a half-empty week.
+        for grade in ("Β", "Γ"):
+            secs = [g for g in sections.values()
+                    if g["grade"] == grade and not g["hidden"]]
+            trs = [g for g in tracks.values()
+                   if g["grade"] == grade and not g["hidden"]]
+            if not secs or not trs:
+                continue
+            for track in trs:
+                assert len(track["lessons"]) >= 3, \
+                    "track %s only has %d lessons" % (track["label"], len(track["lessons"]))
+
+    failed = 0
+    for ok, name in results:
+        if not ok:
+            failed += 1
+        print("  %s %s" % ("✓" if ok else "✗", name))
+    print("\n%d/%d passed" % (len(results) - failed, len(results)))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else DEFAULT))

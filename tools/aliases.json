@@ -1,0 +1,192 @@
+{
+  "_comment": "Hand-editable normalization tables used by pdf2schedule.py. Edit this file (not the converter) when a new PDF revision introduces a renamed subject, a new room code, or a new group.",
+  "subjects": {
+    "_comment": "Raw subject text (after joining wrapped fragments and stripping the trailing grade letter) -> canonical name. Keys are matched case-sensitively after whitespace collapsing.",
+    "ΓΛΩΣΣΑΛΟΓΟΤΕΧΝΙΑ": "Γλώσσα / Λογοτεχνία",
+    "ΓΛΩΣΣΑ/ΛΟΓΟΤΕΧΝΙΑ": "Γλώσσα / Λογοτεχνία",
+    "ΓλώσσαΛογοτεχνία": "Γλώσσα / Λογοτεχνία",
+    "Γλώσσα/Λογοτεχνία": "Γλώσσα / Λογοτεχνία",
+    "ΓΛΩ/ΛΟΓ": "Γλώσσα / Λογοτεχνία",
+    "Μαιθηματικά ΠΡΟΣ": "Μαθηματικά Προσανατολισμού",
+    "Μαθηματικά ΠΡΟΣ": "Μαθηματικά Προσανατολισμού",
+    "ΑρχαίαΠροσανατολισμού": "Αρχαία Προσανατολισμού",
+    "ΒιολογίαΠροσανατολισμού": "Βιολογία Προσανατολισμού",
+    "ΙστορίαΠροσανατολισμού": "Ιστορία Προσανατολισμού",
+    "ΦυσικήΠροσανατολισμού": "Φυσική Προσανατολισμού",
+    "ΧημείαΠροσανατολισμού": "Χημεία Προσανατολισμού",
+    "Μαθηματικά Κόντρα": "Μαθηματικά (Κόντρα)",
+    "ΙστοριαΚόντρα": "Ιστορία (Κόντρα)",
+    "ΙστορίαΚόντρα": "Ιστορία (Κόντρα)",
+    "ΠολιτικήΠαιδεία": "Πολιτική Παιδεία",
+    "φιλοσοφία": "Φιλοσοφία",
+    "Γερμανικά": "Γερμανικά",
+    "Γεωμετρία": "Γεωμετρία",
+    "Οικονομία": "Οικονομία",
+    "Η/Υ": "Εφαρμογές Πληροφορικής",
+    "Άλγεβρα": "Άλγεβρα",
+    "Αγγλικά": "Αγγλικά",
+    "Αρχαία": "Αρχαία",
+    "Βιολογία": "Βιολογία",
+    "Γυμναστική": "Γυμναστική",
+    "Θρησκευτικά": "Θρησκευτικά",
+    "Ιστορία": "Ιστορία",
+    "Λατινικά": "Λατινικά",
+    "Πληροφορική": "Πληροφορική",
+    "Φυσική": "Φυσική",
+    "Χημεία": "Χημεία"
+  },
+  "subjectShort": {
+    "_comment": "Optional compact labels for the narrow week-grid cells. Falls back to the canonical name.",
+    "Γλώσσα / Λογοτεχνία": "Γλώσσα",
+    "Μαθηματικά Προσανατολισμού": "Μαθ. Προσ.",
+    "Αρχαία Προσανατολισμού": "Αρχαία Προσ.",
+    "Βιολογία Προσανατολισμού": "Βιολ. Προσ.",
+    "Ιστορία Προσανατολισμού": "Ιστ. Προσ.",
+    "Φυσική Προσανατολισμού": "Φυσ. Προσ.",
+    "Χημεία Προσανατολισμού": "Χημ. Προσ.",
+    "Εφαρμογές Πληροφορικής": "Η/Υ",
+    "Μαθηματικά (Κόντρα)": "Μαθ. Κόντρα",
+    "Ιστορία (Κόντρα)": "Ιστ. Κόντρα",
+    "Πολιτική Παιδεία": "Πολ. Παιδεία"
+  },
+  "rooms": {
+    "_comment": "Two/three-letter room codes printed in the PDF cells -> human-readable Greek name.",
+    "ΕΠ": "Εργαστήριο Πληροφορικής",
+    "ΕΦΕ": "Εργαστήριο Φυσικών Επιστημών",
+    "ΕΓ": "Εργαστήριο Γεωγραφίας",
+    "ΕΧ": "Εργαστήριο Χημείας",
+    "ΙΓ": "Αίθουσα ΙΓ",
+    "ΙΧ": "Αίθουσα ΙΧ",
+    "ΓΒ": "Αίθουσα ΓΒ",
+    "ΡΤ": "Αίθουσα ΡΤ",
+    "ΣΚ": "Αίθουσα ΣΚ",
+    "ΜΤ": "Αίθουσα ΜΤ"
+  },
+  "hideRooms": {
+    "_comment": "Room codes the PDF prints but the school does not actually use. Lessons keep their subject and teacher; the room is simply not shown. Remove a code from `labels` to start showing it again.",
+    "labels": [
+      "ΕΦΕ"
+    ]
+  },
+  "teachers": {
+    "_comment": "Fixes for teacher names mangled by PDF line-wrapping.",
+    "ΙΩΑΝΝΑ ΧΡΙΣΤΙΝΑΚΗ ΥΠ/ ΝΤΡΙΑ": "ΙΩΑΝΝΑ ΧΡΙΣΤΙΝΑΚΗ (ΥΠ/ΝΤΡΙΑ)",
+    "ΙΩΑΝΝΑ ΧΡΙΣΤΙΝΑΚΗ ΥΠ ΝΤΡΙΑ": "ΙΩΑΝΝΑ ΧΡΙΣΤΙΝΑΚΗ (ΥΠ/ΝΤΡΙΑ)",
+    "ΓΙΑΝΝΗΣ ΔΗΜΑΚΗΣ ΥΠ ΝΤΗΣ": "ΓΙΑΝΝΗΣ ΔΗΜΑΚΗΣ (ΥΠ/ΝΤΗΣ)",
+    "ΓΙΑΝΝΗΣ ΔΗΜΑΚΗΣ ΥΠ/ ΝΤΗΣ": "ΓΙΑΝΝΗΣ ΔΗΜΑΚΗΣ (ΥΠ/ΝΤΗΣ)",
+    "ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗ Σ": "ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗΣ"
+  },
+  "groupRules": {
+    "_comment": "Ordered regex rules matched against the normalized group label. First match wins. Fields: grade, kind (section|track|kontra|extra), track (display name of the orientation).",
+    "rules": [
+      {
+        "re": "^Α[1-9][0-9]*$",
+        "grade": "Α",
+        "kind": "section"
+      },
+      {
+        "re": "^Β[1-9][0-9]*$",
+        "grade": "Β",
+        "kind": "section"
+      },
+      {
+        "re": "^Γ[1-9][0-9]*$",
+        "grade": "Γ",
+        "kind": "section"
+      },
+      {
+        "re": "^Βα[0-9]+$",
+        "grade": "Β",
+        "kind": "track",
+        "track": "Ανθρωπιστικών Σπουδών"
+      },
+      {
+        "re": "^Βθ[0-9]+$",
+        "grade": "Β",
+        "kind": "track",
+        "track": "Θετικών Σπουδών"
+      },
+      {
+        "re": "^Γα[0-9]+$",
+        "grade": "Γ",
+        "kind": "track",
+        "track": "Ανθρωπιστικών Σπουδών"
+      },
+      {
+        "re": "^Γοικ[0-9]+$",
+        "grade": "Γ",
+        "kind": "track",
+        "track": "Οικονομίας & Πληροφορικής"
+      },
+      {
+        "re": "^Γθετικ",
+        "grade": "Γ",
+        "kind": "track",
+        "track": "Θετικών Σπουδών"
+      },
+      {
+        "re": "^Γυγ",
+        "grade": "Γ",
+        "kind": "track",
+        "track": "Υγείας & Ζωής (Βιολογία)"
+      },
+      {
+        "re": "^Γιστορια\\s*[0-9]*$",
+        "grade": "Γ",
+        "kind": "kontra",
+        "track": "Ιστορία (Κόντρα)"
+      },
+      {
+        "re": "^Γμαθηματικα\\s*[0-9]*$",
+        "grade": "Γ",
+        "kind": "kontra",
+        "track": "Μαθηματικά (Κόντρα)"
+      },
+      {
+        "re": "^([ΑΒΓ][0-9]+)γαλ$",
+        "kind": "extra",
+        "parent": 1,
+        "name": "Γαλλικά"
+      },
+      {
+        "re": "^([ΑΒΓ][0-9]+)Α$",
+        "kind": "extra",
+        "parent": 1,
+        "name": "Αγγλικά (2ο τμήμα)"
+      },
+      {
+        "re": "^([ΑΒΓ][0-9]+)Π$",
+        "kind": "extra",
+        "parent": 1,
+        "name": "Πληροφορική (2ο τμήμα)"
+      }
+    ]
+  },
+  "groupOverrides": {
+    "_comment": "Manual classification for labels the rules above cannot express. Same fields as a rule.",
+    "ΒΑ1": {
+      "grade": "Β",
+      "kind": "extra",
+      "name": "Αγγλικά Β (ομάδα 1)"
+    },
+    "βθ1": {
+      "grade": "Β",
+      "kind": "extra",
+      "name": "Θετικών (ομάδα 1)"
+    },
+    "βθ2": {
+      "grade": "Β",
+      "kind": "extra",
+      "name": "Θετικών (ομάδα 2)"
+    },
+    "Γραμ.Υ": {
+      "grade": "Γ",
+      "kind": "extra",
+      "name": "Γραμματεία / Υποστήριξη"
+    }
+  },
+  "excludeGroups": {
+    "_comment": "Groups to keep out of the app even if the PDF has a page for them — e.g. a class that does not exist and was exported by mistake. Groups with no lessons at all are hidden automatically and do not need listing here.",
+    "labels": []
+  }
+}

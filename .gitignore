@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+
+# Rebuildable from data/schedule.json
+tools/test/fixtures/

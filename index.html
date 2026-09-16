@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ωρολόγιο Πρόγραμμα — 7ο ΓΕΛ Ηρακλείου</title>
+<meta name="description" content="Το εβδομαδιαίο πρόγραμμα του 7ου ΓΕΛ Ηρακλείου σε μία οθόνη, με ζωντανή επισήμανση της τρέχουσας ώρας.">
+<meta name="theme-color" content="#1d4ed8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1020" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Πρόγραμμα">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="banners" class="banners" aria-live="polite"></div>
+
+<header class="app-bar">
+  <div class="app-bar__text">
+    <h1 class="app-bar__title">Πρόγραμμα</h1>
+    <p class="app-bar__sub" id="barSub">7ο ΓΕΛ Ηρακλείου</p>
+  </div>
+  <div class="app-bar__actions">
+    <button type="button" id="installBtn" class="icon-btn" hidden
+            aria-label="Εγκατάσταση εφαρμογής" title="Εγκατάσταση">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+    </button>
+    <button type="button" id="settingsBtn" class="icon-btn"
+            aria-label="Αλλαγή τμήματος" title="Αλλαγή τμήματος">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.11a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.11A1.7 1.7 0 0 0 4.6 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.11a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v0a1.7 1.7 0 0 0 1.56 1H21a2 2 0 1 1 0 4h-.11a1.7 1.7 0 0 0-1.49 1Z"/></svg>
+    </button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs" role="tablist" aria-label="Προβολή">
+  <button type="button" class="tabs__btn is-active" role="tab" data-view="today"
+          id="tab-today" aria-selected="true" aria-controls="view-today">Σήμερα</button>
+  <button type="button" class="tabs__btn" role="tab" data-view="week"
+          id="tab-week" aria-selected="false" aria-controls="view-week">Εβδομάδα</button>
+</nav>
+
+<main id="main" class="main">
+
+  <section id="view-today" class="view" role="tabpanel" aria-labelledby="tab-today">
+    <div id="statusCard" class="status"></div>
+    <ol id="todayList" class="periods"></ol>
+  </section>
+
+  <section id="view-week" class="view" role="tabpanel" aria-labelledby="tab-week" hidden>
+    <div class="week-head">
+      <div class="daystrip" id="dayStrip" role="tablist" aria-label="Ημέρα"></div>
+      <button type="button" id="gridToggle" class="ghost-btn" aria-pressed="false">Πλέγμα</button>
+    </div>
+    <ol id="weekList" class="periods"></ol>
+    <div id="weekGrid" class="gridwrap" hidden></div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <p id="footMeta"></p>
+  <button type="button" id="checkBtn" class="ghost-btn">Έλεγχος για νέο πρόγραμμα</button>
+</footer>
+
+<!-- Τμήμα picker -->
+<dialog id="picker" class="sheet" aria-labelledby="pickerTitle">
+  <form method="dialog" class="sheet__inner" id="pickerForm">
+    <div class="sheet__bar">
+      <h2 id="pickerTitle">Το τμήμα σου</h2>
+      <button type="button" id="pickerClose" class="icon-btn" aria-label="Κλείσιμο">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="sheet__body" id="pickerBody"></div>
+    <div class="sheet__foot">
+      <p id="pickerHint" class="hint"></p>
+      <button type="button" id="pickerSave" class="primary-btn">Αποθήκευση</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- iOS install instructions -->
+<dialog id="iosSheet" class="sheet" aria-labelledby="iosTitle">
+  <div class="sheet__inner">
+    <div class="sheet__bar">
+      <h2 id="iosTitle">Προσθήκη στην Αρχική Οθόνη</h2>
+      <button type="button" id="iosClose" class="icon-btn" aria-label="Κλείσιμο">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="sheet__body">
+      <ol class="steps">
+        <li>Πάτησε το κουμπί <strong>Κοινή χρήση</strong>
+          <svg class="inline-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0 4 4m-4-4L8 7"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+          στη γραμμή του Safari.</li>
+        <li>Κύλησε και διάλεξε <strong>«Προσθήκη στην Αρχική Οθόνη»</strong>.</li>
+        <li>Πάτησε <strong>Προσθήκη</strong>. Η εφαρμογή θα δουλεύει και χωρίς σύνδεση.</li>
+      </ol>
+    </div>
+  </div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
