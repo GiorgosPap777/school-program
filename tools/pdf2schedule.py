@@ -234,6 +234,43 @@ def cell_bounds(content: str):
     return rows, cols, header
 
 
+# How close a stroked line has to be to a computed boundary to count as it.
+LINE_TOL = 0.6
+
+
+def column_spans(content: str, rows: list, cols: list) -> list:
+    """Return spans[row][col] = (first_col, last_col) of the cell covering it.
+
+    aSc draws a double period as one wide cell: the vertical rule between the
+    two period columns is simply not stroked for that day. The lesson text is
+    then centred across the pair and lands in whichever column it happens to
+    start in, leaving the other looking like a free period. Reading the missing
+    rules back out is what lets both periods be filled in.
+    """
+    segs = []
+    for x1, y1, x2, y2 in LINE_RE.findall(content):
+        x1, y1, x2, y2 = float(x1), float(y1), float(x2), float(y2)
+        if abs(x1 - x2) < 0.5 and abs(y1 - y2) > 1:
+            segs.append((x1, min(y1, y2), max(y1, y2)))
+
+    spans = []
+    for lo, hi in rows:
+        breaks = [0]
+        for j in range(len(cols) - 1):
+            bx = cols[j][1]
+            drawn = any(abs(x - bx) < LINE_TOL and y0 <= lo + LINE_TOL and y1 >= hi - LINE_TOL
+                        for x, y0, y1 in segs)
+            if drawn:
+                breaks.append(j + 1)
+        breaks.append(len(cols))
+        row = [None] * len(cols)
+        for start, stop in zip(breaks, breaks[1:]):
+            for c in range(start, stop):
+                row[c] = (start, stop - 1)
+        spans.append(row)
+    return spans
+
+
 def read_periods(items: list, cols: list, header: tuple) -> list:
     """Read the period start/end times out of the header band."""
     periods = [None] * len(cols)
@@ -271,6 +308,42 @@ def normalise_label(label: str) -> str:
     return collapse(label).translate(LATIN_TO_GREEK)
 
 
+GREEK_WORD_RE = re.compile(r"[Α-ΩΆΈΉΊΌΎΏ][Α-ΩΆΈΉΊΌΎΏα-ωάέήίόύώΐΰϊϋ]*")
+
+
+def initials_of(name: str) -> set:
+    """The 2- and 3-letter initial codes a teacher's name could be written as.
+
+    In a merged cell aSc prints the teacher as initials instead of the full
+    name — 'ΕΓ' for ΕΛΕΝΗ ΓΙΑΜΑΛΑΚΗ. They are the same shape as a room code,
+    so they can only be told apart by looking them up.
+    """
+    words = GREEK_WORD_RE.findall(name)
+    codes = set()
+    if len(words) >= 2:
+        codes.add(words[0][0] + words[1][0])
+    if len(words) >= 3:
+        codes.add(words[0][0] + words[1][0] + words[2][0])
+    return codes
+
+
+def resolve_initials(code: str, subject: str, lessons: list):
+    """Match an initials code against the teachers on the same page.
+
+    Narrowest pool first: a teacher who already teaches this exact subject to
+    this class. Two teachers on one page can share initials (ΜΑΡΙΑ ΤΣΙΩΚΟΥ and
+    ΜΑΡΙΑ ΤΣΑΓΚΑΡΑΚΗ are both 'ΜΤ'); which of them teaches Γλώσσα to Γ2 is not.
+    """
+    same_subject = {l["teacher"] for l in lessons
+                    if l["teacher"] and l["subject"] == subject}
+    page = {l["teacher"] for l in lessons if l["teacher"]}
+    for pool in (same_subject, page):
+        hits = sorted(t for t in pool if code in initials_of(t))
+        if len(hits) == 1:
+            return hits[0]
+    return None
+
+
 class Normaliser:
     def __init__(self, aliases: dict, report):
         self.subjects = {collapse(k): v for k, v in aliases["subjects"].items()
@@ -285,6 +358,8 @@ class Normaliser:
         self.overrides = {k: v for k, v in aliases["groupOverrides"].items()
                           if not k.startswith("_")}
         self.excluded = set(aliases.get("excludeGroups", {}).get("labels", []))
+        self.group_rooms = {k: v for k, v in aliases.get("groupRooms", {}).items()
+                            if not k.startswith("_")}
         self.report = report
 
     def subject(self, raw: str) -> str:
@@ -305,6 +380,9 @@ class Normaliser:
         if not text:
             return None
         return self.teachers.get(text, text)
+
+    def is_room(self, code: str) -> bool:
+        return code in self.rooms or code in self.hidden_rooms
 
     def room(self, code: str):
         if not code:
@@ -344,6 +422,11 @@ class Report:
         self.empty = []
         self.excluded = []
         self.dropped_rooms = {}
+        self.merged = []
+        self.resolved_initials = set()
+        self.empty_kontra = []
+        self.roomless_groups = set()
+        self.retimed = []
 
     def ok(self) -> bool:
         return not (self.unknown_subjects or self.unclassified_groups or self.warnings)
@@ -373,7 +456,14 @@ class Report:
         section("ΑΙΘΟΥΣΕΣ ΠΟΥ ΑΓΝΟΗΘΗΚΑΝ (hideRooms)",
                 ["%s — σε %d μαθήματα" % (k, v)
                  for k, v in sorted(self.dropped_rooms.items())])
+        section("ΩΡΕΣ ΠΟΥ ΔΙΟΡΘΩΘΗΚΑΝ ΑΠΟ ΤΟ ΩΡΑΡΙΟ ΤΟΥ ΣΧΟΛΕΙΟΥ", self.retimed)
+        section("ΕΝΩΜΕΝΑ ΚΕΛΙΑ — ΔΙΩΡΑ (γράφτηκαν και στις δύο ώρες)", self.merged)
+        section("ΑΡΧΙΚΑ ΚΑΘΗΓΗΤΩΝ ΠΟΥ ΑΝΑΓΝΩΡΙΣΤΗΚΑΝ", self.resolved_initials)
         section("ΑΤΑΞΙΝΟΜΗΤΕΣ ΟΜΑΔΕΣ", self.unclassified_groups)
+        section("ΟΜΑΔΕΣ ΧΩΡΙΣ ΑΙΘΟΥΣΑ (πρόσθεσέ τες στο groupRooms όταν τη μάθεις)",
+                self.roomless_groups)
+        section("ΚΟΝΤΡΑ ΧΩΡΙΣ ΩΡΑ ΑΥΤΗ ΤΗΝ ΕΒΔΟΜΑΔΑ (εμφανίζονται κανονικά)",
+                self.empty_kontra)
         section("ΚΡΥΜΜΕΝΕΣ — ΧΩΡΙΣ ΜΑΘΗΜΑΤΑ (δεν εμφανίζονται στην εφαρμογή)",
                 self.empty)
         section("ΚΡΥΜΜΕΝΕΣ — ΑΠΟΚΛΕΙΣΜΕΝΕΣ ΧΕΙΡΟΚΙΝΗΤΑ (excludeGroups)",
@@ -407,7 +497,11 @@ def parse_page(items: list, content: str, norm: Normaliser, report: Report):
     if not label:
         return None, None, None
 
-    cells = defaultdict(lambda: {"subject": [], "teacher": [], "room": []})
+    # A merged cell has no rule down its middle, so both of its period columns
+    # belong to one lesson. Collect every item under the span's leftmost column.
+    spans = column_spans(content, rows, cols)
+
+    cells = defaultdict(lambda: {"subject": [], "teacher": [], "code": []})
     for it in items:
         r, c = bucket(it["y"], rows), bucket(it["x"], cols)
         if r is None or c is None:
@@ -415,14 +509,17 @@ def parse_page(items: list, content: str, norm: Normaliser, report: Report):
         if it["size"] >= SUBJECT_MIN_SIZE:
             kind = "subject"
         elif ROOM_RE.match(it["text"].strip()):
-            # Long teacher names auto-shrink into the room-code size band, so
-            # the shape of the text decides, not the font size alone.
-            kind = "room"
+            # Long teacher names auto-shrink into the short-code size band, so
+            # the shape of the text decides, not the font size alone. Whether a
+            # short code is a room or a teacher's initials is settled below.
+            kind = "code"
         else:
             kind = "teacher"
-        cells[(r, c)][kind].append(it)
+        cells[(r, spans[r][c][0])][kind].append(it)
 
-    lessons = []
+    # First pass: one record per cell, with full teacher names but short codes
+    # left as written. Resolving those needs the whole page's teacher list.
+    cooked = []
     for (r, c), parts in sorted(cells.items()):
         def joined(key, sep=""):
             ordered = sorted(parts[key], key=lambda it: (round(it["y"] / 6), it["x"]))
@@ -431,17 +528,49 @@ def parse_page(items: list, content: str, norm: Normaliser, report: Report):
         subject_raw = joined("subject")
         if not subject_raw.strip():
             continue
-        # Omit empty fields rather than writing nulls: it keeps the file small
-        # and quick to parse on an old phone. The app already treats a missing
-        # teacher or room the same as a null one.
-        lesson = {"d": r, "p": c + 1, "subject": norm.subject(subject_raw)}
-        teacher = norm.teacher(joined("teacher", " "))
-        if teacher:
-            lesson["teacher"] = teacher
-        room = norm.room(joined("room", " ").strip())
-        if room:
-            lesson["room"] = room
-        lessons.append(lesson)
+        cooked.append({
+            "d": r,
+            "span": spans[r][c],
+            "subject": norm.subject(subject_raw),
+            "teacher": norm.teacher(joined("teacher", " ")),
+            "code": joined("code", " ").strip(),
+        })
+
+    lessons = []
+    for cell in cooked:
+        room = None
+        if cell["code"] and not cell["teacher"] and not norm.is_room(cell["code"]):
+            who = resolve_initials(cell["code"], cell["subject"], cooked)
+            if who:
+                cell["teacher"] = who
+                report.resolved_initials.add("%s = %s" % (cell["code"], who))
+            else:
+                report.warnings.append(
+                    "«%s» %s ώρα %d: ο κωδικός «%s» δεν είναι ούτε αίθουσα "
+                    "ούτε αρχικά καθηγητή" % (label, DAY_NAMES[cell["d"]],
+                                              cell["span"][0] + 1, cell["code"]))
+                room = norm.room(cell["code"])
+        elif cell["code"]:
+            room = norm.room(cell["code"])
+
+        first, last = cell["span"]
+        if last > first:
+            report.merged.append("%s %s ώρες %d-%d: %s"
+                                 % (label, DAY_NAMES[cell["d"]], first + 1, last + 1,
+                                    cell["subject"]))
+        # One lesson per period the cell spans, so a double period fills both
+        # slots instead of leaving the second looking free.
+        for c in range(first, last + 1):
+            # Omit empty fields rather than writing nulls: it keeps the file
+            # small and quick to parse on an old phone. The app already treats
+            # a missing teacher or room the same as a null one.
+            lesson = {"d": cell["d"], "p": c + 1, "subject": cell["subject"]}
+            if cell["teacher"]:
+                lesson["teacher"] = cell["teacher"]
+            if room:
+                lesson["room"] = room
+            lessons.append(lesson)
+    lessons.sort(key=lambda l: (l["d"], l["p"]))
     return label, lessons, periods
 
 
@@ -490,26 +619,57 @@ def build(pdf_path: str, args) -> tuple:
         # A page with no lessons is a group nobody attends; the app never offers
         # one. Keep it in the file so a later revision that fills it just works.
         excluded = label in norm.excluded
+        kind = info.get("kind", "extra")
+        # A page with no lessons is normally a group nobody attends. «Κόντρα»
+        # electives are the exception: they are real classes that simply may
+        # not meet in a given week, so they stay on offer. Hide one by name in
+        # aliases.json -> excludeGroups if it genuinely does not exist.
+        hidden = excluded or (not lessons and kind != "kontra")
         if excluded:
             report.excluded.append(label)
-        elif not lessons:
+        elif hidden:
             report.empty.append(label)
+        elif not lessons:
+            report.empty_kontra.append(label)
         group = {
             "label": label,
             "grade": info.get("grade"),
-            "kind": info.get("kind", "extra"),
-            "hidden": excluded or not lessons,
+            "kind": kind,
+            "hidden": hidden,
             "lessons": lessons,
         }
         for key in ("track", "name", "parent"):
             if info.get(key):
                 group[key] = info[key]
+        room = norm.group_rooms.get(label)
+        if room:
+            group["room"] = room
+        elif not hidden:
+            report.roomless_groups.add(label)
         groups[label] = group
 
     if not groups:
         raise ConversionError("no timetable pages recognised — is this an aSc export?")
     if periods is None:
         raise ConversionError("could not read the period header row")
+
+    # The times in the aSc header are the ones whoever built the timetable typed
+    # in, and this school's bell does not follow them. The official ωράριο wins,
+    # but any disagreement is reported so nobody has to notice it by being late.
+    official = aliases.get("periodTimes", {}).get("times")
+    if official:
+        if len(official) != len(periods):
+            report.warnings.append(
+                "το periodTimes έχει %d ώρες, το PDF %d — αγνοήθηκε"
+                % (len(official), len(periods)))
+        else:
+            for i, (start, end) in enumerate(official):
+                was = periods[i]
+                if (was["start"], was["end"]) != (start, end):
+                    report.retimed.append(
+                        "%dη ώρα: PDF %s-%s -> ωράριο σχολείου %s-%s"
+                        % (i + 1, was["start"], was["end"], start, end))
+                periods[i] = {"n": i + 1, "start": start, "end": end}
 
     # Surface any slot where a section and a track both teach the student at
     # once. Zero is expected; anything else means the merge would hide a lesson.

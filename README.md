@@ -127,9 +127,11 @@ so without a bump the old files stay cached on every installed phone.
    python3 tools/pdf2schedule.py "NewProgramme.pdf" -o data/schedule.json --version 2026-11-02 --valid-from 2026-11-02 --valid-to 2026-11-06
    ```
 
-3. **Read `data/report.txt`.** It lists unknown subjects, unclassified groups and
-   any timetable collisions. A clean report means the import is trustworthy; if
-   something is listed, add it to `tools/aliases.json` and re-run.
+3. **Read `data/report.txt`.** It lists unknown subjects, unclassified groups,
+   merged double periods, teacher initials it resolved, hours it corrected
+   against the school's ωράριο, groups with no classroom, and any timetable
+   collisions. A clean report means the import is trustworthy; if something is
+   listed, add it to `tools/aliases.json` and re-run.
 4. Check the invariants still hold:
 
    ```bash
@@ -191,16 +193,17 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
   "sourceDate": "2026-09-11",            // the date printed in the PDF footer
   "validFrom": "2026-09-14", "validTo": "2026-09-18",
   "days": ["Δευτέρα", "…"],
-  "periods": [{ "n": 1, "start": "08:15", "end": "09:00" }],
+  "periods": [{ "n": 1, "start": "08:10", "end": "08:55" }],
   "rooms": { "ΕΠ": "Εργαστήριο Πληροφορικής" },
   "subjectShort": { "Μαθηματικά Προσανατολισμού": "Μαθ. Προσ." },
   "groups": {
     "Βθ1": {
       "label": "Βθ1", "grade": "Β", "kind": "track",
       "track": "Θετικών Σπουδών", "hidden": false,
+      "room": "Αίθ. 8",                    // home classroom for this group
       "lessons": [
         { "d": 0, "p": 3, "subject": "Φυσική Προσανατολισμού",
-          "teacher": "ΓΙΑΝΝΟΥΛΑ ΒΑΛΕΡΓΑΚΗ", "room": null }
+          "teacher": "ΓΙΑΝΝΟΥΛΑ ΒΑΛΕΡΓΑΚΗ" }
       ]
     }
   }
@@ -209,8 +212,13 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 
 `kind` is one of `section` (Α1, Β3, Γ2 …), `track` (Βθ1, Γοικ2, Γθετικό …),
 `kontra` (Γ' electives) or `extra` (second foreign language and similar).
-`d` is a 0-based day index; `p` is a 1-based period number. `hidden` groups are
-kept in the file but never offered in the picker.
+`d` is a 0-based day index; `p` is a 1-based period number. `teacher` and `room`
+are omitted rather than written as `null` when there is nothing to say. A lesson's
+own `room` means it happens somewhere other than usual; otherwise the student is
+in the `room` of the group the lesson came from. `hidden` groups are kept in the
+file but never offered in the picker — that flag is the converter's decision and
+the app does not second-guess it, which is what keeps an empty-but-real κόντρα
+elective on offer while an empty section stays hidden.
 
 The picker is built entirely by grouping over `groups` — no class list is
 hardcoded anywhere — so a new section or orientation next term appears on its own.
@@ -251,8 +259,8 @@ Three things keep it there, all of which are easy to undo by accident:
 - **Background checks are throttled** to once per `CHECK_INTERVAL_MS` (30 min).
   The «Έλεγχος για νέο πρόγραμμα» button ignores the throttle.
 
-Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 73 KB raw and
-6.5 KB gzipped, so serving it uncompressed costs 11× more.
+Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 76 KB raw and
+4.9 KB gzipped, so serving it uncompressed costs 15× more.
 
 ## Testing
 
@@ -279,19 +287,43 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
 
 - **Period 7** (13:25–14:05) exists in the grid but is unused in the current
   revision. The app renders only as far as each day's last real lesson.
-- **`ΓΛΩ/ΛΟΓ` cells** in the source PDF have no teacher and are treated as
-  `Γλώσσα / Λογοτεχνία`. If that turns out to be a different activity, change the
-  one line for it in `tools/aliases.json`.
+- **Double periods are drawn as one merged cell.** When a class has the same
+  lesson two hours running, aSc leaves out the rule between the two columns and
+  centres the text across both. Read naively that fills one hour and leaves the
+  other looking free — and drops the teacher, who is centred into the *other*
+  half. The converter reads the missing rules back out of the drawing commands
+  and writes the lesson to every hour the cell spans. The import report lists
+  every merged cell it found (13 in the current revision, all `ΓΛΩ/ΛΟΓ`).
+- **Inside a merged cell the teacher is printed as initials** — `ΕΓ`, not
+  `ΕΛΕΝΗ ΓΙΑΜΑΛΑΚΗ`. That is the same shape as a room code, so the two can only
+  be told apart by lookup: anything that is not a known room is matched against
+  the teachers on that same page, narrowed by subject when two of them share
+  initials (both ΜΑΡΙΑ ΤΣΙΩΚΟΥ and ΜΑΡΙΑ ΤΣΑΓΚΑΡΑΚΗ are `ΜΤ`; only one teaches
+  Γλώσσα to Γ2). Every resolution is listed in the report; anything unresolved
+  is a warning, never a silent guess.
+- **Period times come from the school's ωράριο, not the PDF.** aSc prints
+  whatever times were typed into it and this school's bell does not follow them —
+  they were five minutes out on every hour. `periodTimes.times` in
+  `tools/aliases.json` holds the official ΗΜΕΡΗΣΙΟ ΩΡΑΡΙΟ ΛΕΙΤΟΥΡΓΙΑΣ and wins;
+  the report names every hour it had to correct. Delete the block to go back to
+  trusting the PDF.
+- **Classrooms come from the noticeboard,** not the PDF, via `groupRooms` in
+  `tools/aliases.json` — one home room per group. A lesson only carries a room of
+  its own when it is somewhere else (a lab), and that wins. This matters most for
+  Γ΄, who move between their general room and their orientation room during the
+  day. A group that can be picked but has no room is flagged by the tests.
 - **Rooms the school does not use are dropped.** `ΕΦΕ` is printed on 13 lessons
   in the PDF but that lab is not actually used, so it is stripped at import via
   `hideRooms.labels` in `tools/aliases.json`; the lessons keep their subject and
   teacher. Remove the code from that list to start showing it again. `ΕΠ`
-  (Εργαστήριο Πληροφορικής) is the only room shown today.
-- **Groups with no lessons are hidden.** The current PDF has pages for 18 groups
-  that carry no lessons — including Γ6 and Γ7, which are not real classes and were
-  exported by accident. They stay in `schedule.json` (so a later revision that
-  fills them just works) but the picker never offers them. The import report lists
-  every group hidden this way, so an accidental page is visible at import time.
+  (Εργαστήριο Πληροφορικής) is the only room the PDF itself supplies today.
+- **Groups with no lessons are hidden — except «κόντρα» electives.** The current
+  PDF has pages for 15 groups that carry no lessons, including Γ6 and Γ7, which
+  are not real classes and were exported by accident. They stay in
+  `schedule.json` (so a later revision that fills them just works) but the picker
+  never offers them. A κόντρα elective is the exception: it is a real, active
+  class that simply may have no hour in a given week, so it is always offered.
+  Hide one by name via `excludeGroups.labels` if it genuinely does not exist.
 - To suppress a group that *does* have lessons but should not be offered, add its
   label to `excludeGroups.labels` in `tools/aliases.json`.
 - The converter reads the table geometry from the ruled lines aSc draws, not from

@@ -50,17 +50,77 @@
     "Πολιτική Παιδεία": "Πολ. Παιδεία"
   },
   "rooms": {
-    "_comment": "Two/three-letter room codes printed in the PDF cells -> human-readable Greek name.",
+    "_comment": "Two/three-letter room codes printed in the PDF cells -> human-readable Greek name. Codes of the same shape that are really a teacher's initials (aSc prints those inside merged double-period cells) are resolved against the page's teachers instead — do not list them here.",
     "ΕΠ": "Εργαστήριο Πληροφορικής",
-    "ΕΦΕ": "Εργαστήριο Φυσικών Επιστημών",
-    "ΕΓ": "Εργαστήριο Γεωγραφίας",
-    "ΕΧ": "Εργαστήριο Χημείας",
-    "ΙΓ": "Αίθουσα ΙΓ",
-    "ΙΧ": "Αίθουσα ΙΧ",
-    "ΓΒ": "Αίθουσα ΓΒ",
-    "ΡΤ": "Αίθουσα ΡΤ",
-    "ΣΚ": "Αίθουσα ΣΚ",
-    "ΜΤ": "Αίθουσα ΜΤ"
+    "ΕΦΕ": "Εργαστήριο Φυσικών Επιστημών"
+  },
+  "periodTimes": {
+    "_comment": "The school's official ΗΜΕΡΗΣΙΟ ΩΡΑΡΙΟ ΛΕΙΤΟΥΡΓΙΑΣ. aSc prints its own times in the PDF header and they are not always the ones actually rung, so these win. Remove the whole block to go back to trusting the PDF; a mismatch is always noted in the report.",
+    "times": [
+      [
+        "08:10",
+        "08:55"
+      ],
+      [
+        "09:00",
+        "09:45"
+      ],
+      [
+        "09:55",
+        "10:40"
+      ],
+      [
+        "10:50",
+        "11:35"
+      ],
+      [
+        "11:45",
+        "12:30"
+      ],
+      [
+        "12:35",
+        "13:20"
+      ],
+      [
+        "13:25",
+        "14:05"
+      ]
+    ]
+  },
+  "groupRooms": {
+    "_comment": "Home classroom per group, from the «Αίθουσες» sheet on the school noticeboard. Shown for every lesson of that group unless the lesson itself names a different room (a lab).",
+    "Α1": "Αίθ. 1",
+    "Α2": "Αίθ. 2",
+    "Α3": "Αίθ. 3",
+    "Α4": "4Α",
+    "Α5": "Αίθ. 5",
+    "Β1": "Αίθ. 6",
+    "Β2": "Αίθ. 7",
+    "Β3": "Αίθ. 8",
+    "Β4": "Αίθ. 9",
+    "Β5": "Αίθ. 10",
+    "Βα1": "Αίθ. 6",
+    "Βα2": "Αίθ. 7",
+    "Βθ1": "Αίθ. 8",
+    "Βθ2": "Αίθ. 9",
+    "Βθ3": "Αίθ. 10",
+    "Γ1": "Αίθ. 11",
+    "Γ2": "Αίθ. 12",
+    "Γ3": "Αίθ. 14",
+    "Γ4": "Αίθ. 15",
+    "Γ5": "Αίθ. 16",
+    "Γα1": "Αίθ. 11",
+    "Γα2": "Αίθ. 12",
+    "Γοικ1": "Αίθ. 14",
+    "Γοικ2": "Αίθ. 15",
+    "Γοικ3": "Αίθ. 16",
+    "Γθετικό": "4Β",
+    "Γυγ": "Χημείο",
+    "Γμαθηματικα1": "Αίθ. 16",
+    "Γμαθηματικα2": "Αίθ. 15",
+    "Γιστορια 3": "Αίθ. 14",
+    "Γιστορια4": "Αίθ. 12",
+    "Γιστορια5": "Αίθ. 11"
   },
   "hideRooms": {
     "_comment": "Room codes the PDF prints but the school does not actually use. Lessons keep their subject and teacher; the room is simply not shown. Remove a code from `labels` to start showing it again.",
@@ -186,7 +246,7 @@
     }
   },
   "excludeGroups": {
-    "_comment": "Groups to keep out of the app even if the PDF has a page for them — e.g. a class that does not exist and was exported by mistake. Groups with no lessons at all are hidden automatically and do not need listing here.",
+    "_comment": "Groups to keep out of the app even if the PDF has a page for them — e.g. a class that does not exist and was exported by mistake. Groups with no lessons at all are hidden automatically, except «κόντρα» electives: those are real, active classes that simply may have no hour in a given week, so list one here to hide it.",
     "labels": []
   }
 }

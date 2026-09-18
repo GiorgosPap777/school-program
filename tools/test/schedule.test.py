@@ -112,17 +112,60 @@ def main(path):
                 assert 20 <= len(slots) <= 35, \
                     "%s has %d hours a week, which is out of range" % (label, len(slots))
 
-    @check("every offered group has lessons, and empty ones are hidden")
+    @check("empty groups are hidden, except the «κόντρα» electives")
     def _():
         for name, g in groups.items():
-            if not g["lessons"]:
-                assert g["hidden"], \
-                    "%s has no lessons but is still offered in the picker" % name
+            if g["lessons"] or g["kind"] == "kontra":
+                continue
+            assert g["hidden"], \
+                "%s has no lessons but is still offered in the picker" % name
         offered = sorted(n for n, g in sections.items() if not g["hidden"])
         assert offered, "no sections left for students to pick"
         hidden = sorted(n for n, g in sections.items() if g["hidden"])
         if hidden:
             print("    note: sections hidden as non-existent: %s" % ", ".join(hidden))
+
+    @check("period times match the school's official ωράριο")
+    def _():
+        # aSc prints its own times in the PDF header and this school's bell does
+        # not follow them, so the converter overrides them from aliases.json.
+        # If that override silently stops applying, every countdown in the app
+        # is five minutes wrong — which is exactly how a student is late.
+        with open(os.path.join(ROOT, "tools", "aliases.json"), encoding="utf-8") as fh:
+            official = json.load(fh).get("periodTimes", {}).get("times")
+        assert official, "aliases.json no longer carries the school's ωράριο"
+        got = [[p["start"], p["end"]] for p in data["periods"]]
+        assert got == [list(t) for t in official], \
+            "periods are %s but the ωράριο says %s" % (got, official)
+
+    @check("a double period fills both of its hours")
+    def _():
+        # aSc draws a double period as one merged cell. Reading it as a single
+        # hour leaves the second one looking free, so assert that the pattern
+        # the source actually contains survives the import.
+        doubles = 0
+        for name, g in groups.items():
+            by_slot = {(l["d"], l["p"]): l for l in g["lessons"]}
+            for (d, p), l in by_slot.items():
+                nxt = by_slot.get((d, p + 1))
+                if nxt and nxt["subject"] == l["subject"] \
+                        and nxt.get("teacher") == l.get("teacher"):
+                    doubles += 1
+        assert doubles >= 13, \
+            "only %d consecutive same-subject pairs — merged cells look dropped" % doubles
+
+    @check("every group that actually meets says which room it is in")
+    def _():
+        # A «κόντρα» elective with no hour this week has nowhere to be, so it is
+        # allowed to have no room yet. The moment a revision gives it an hour,
+        # this starts demanding one.
+        missing = sorted(n for n, g in groups.items()
+                         if not g["hidden"] and g["lessons"] and not g.get("room"))
+        assert not missing, "no room for %s — add them to aliases.json groupRooms" \
+            % ", ".join(missing)
+        blank = sorted(n for n, g in groups.items() if not g["hidden"] and not g.get("room"))
+        if blank:
+            print("    note: no room on the noticeboard yet for %s" % ", ".join(blank))
 
     @check("every group is classified and grade-tagged")
     def _():

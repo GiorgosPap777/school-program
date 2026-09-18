@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -386,7 +386,8 @@ function renderStatusCard(date, status, rolled, listedDay) {
     card.innerHTML = dayLine
       + headline(live.subject)
       + detail(`${status.current + 1}η ώρα · λήγει ${durationText(bound.end - status.mins)}`
-        + (live.teacher ? ` · ${live.teacher}` : ''))
+        + (live.teacher ? ` · ${live.teacher}` : '')
+        + (lessonRoom(live) ? ` · ${lessonRoom(live)}` : ''))
       + `<div class="bar"><div class="bar__fill" style="width:${pct.toFixed(1)}%"></div></div>`
       + alsoNow;
     return;
@@ -435,7 +436,7 @@ function renderDayList(target, dayIdx, status, withHeading) {
     else if (kind === 'next' && lesson) classes.push('slot--next');
 
     const meta = lesson
-      ? [lesson.teacher, roomName(lesson.room), lesson.group].filter(Boolean)
+      ? [lesson.teacher, lessonRoom(lesson), lesson.group].filter(Boolean)
       : [];
 
     let tag = '';
@@ -478,13 +479,39 @@ function renderDayStrip(status) {
     btn.setAttribute('aria-label', name);
     btn.setAttribute('role', 'tab');
     btn.setAttribute('aria-selected', String(i === state.weekDay));
-    btn.addEventListener('click', () => {
-      state.weekDay = i;
-      state.weekDayPinned = true;
-      render();
-    });
+    btn.addEventListener('click', () => focusWeekDay(i));
     strip.appendChild(btn);
   });
+}
+
+/** Move the week view to a day, whichever of its two layouts is showing.
+
+    In the list layout that swaps the lessons underneath. The grid layout shows
+    all five days at once, so there is nothing to swap — but it is 560px wide on
+    a 375px screen, so the day still has somewhere to go: its column gets
+    highlighted and scrolled into view. Without that the buttons look broken. */
+function focusWeekDay(i) {
+  state.weekDay = i;
+  state.weekDayPinned = true;
+  render();
+  if (state.showGrid) scrollWeekDayIntoView();
+}
+
+function scrollWeekDayIntoView() {
+  const wrap = $('weekGrid');
+  const head = wrap.querySelector(`thead th[data-day="${state.weekDay}"]`);
+  if (!head || wrap.scrollWidth <= wrap.clientWidth) return;
+  // Measure against the scroller itself. offsetLeft would be relative to
+  // whatever the offsetParent happens to be — the body here — and scrollIntoView
+  // would drag the whole page sideways on iOS to reach an element inside a
+  // horizontal scroller. Centre the column between the sticky time stub and the
+  // right edge and jump straight to it: smooth scrolling is silently a no-op in
+  // some embedded webviews, and a column that does not move at all is the very
+  // bug this is here to fix.
+  const stub = wrap.querySelector('thead th').offsetWidth;
+  const offset = head.getBoundingClientRect().left - wrap.getBoundingClientRect().left;
+  const slack = Math.max(0, (wrap.clientWidth - stub - head.offsetWidth) / 2);
+  wrap.scrollLeft = Math.max(0, wrap.scrollLeft + offset - stub - slack);
 }
 
 function renderWeekGrid(status) {
@@ -498,7 +525,8 @@ function renderWeekGrid(status) {
   const maxPeriod = Math.max(...state.grid.map(lastUsedPeriod), 0);
 
   let html = '<table class="grid"><thead><tr><th scope="col">Ώρα</th>';
-  html += days.map((d, i) => `<th scope="col">${esc(DAY_SHORT[i] || d)}</th>`).join('');
+  html += days.map((d, i) => `<th scope="col" data-day="${i}"`
+    + `${i === state.weekDay ? ' class="is-picked"' : ''}>${esc(DAY_SHORT[i] || d)}</th>`).join('');
   html += '</tr></thead><tbody>';
 
   for (let p = 0; p <= maxPeriod; p++) {
@@ -507,12 +535,15 @@ function renderWeekGrid(status) {
     for (let d = 0; d < days.length; d++) {
       const lesson = state.grid[d][p];
       const cls = [];
+      if (d === state.weekDay) cls.push('is-picked');
       if (slotStatus(status, d, p) === 'now') cls.push('is-now');
       if (lesson && lesson.clash) cls.push('is-conflict');
       html += `<td${cls.length ? ` class="${cls.join(' ')}"` : ''}>`;
       if (lesson) {
         html += `<div class="grid__subject">${esc(shortSubject(lesson.subject))}</div>`;
         if (lesson.teacher) html += `<div class="grid__teacher">${esc(lesson.teacher)}</div>`;
+        const where = lessonRoom(lesson);
+        if (where) html += `<div class="grid__room">${esc(where)}</div>`;
       }
       html += '</td>';
     }
@@ -545,6 +576,19 @@ function roomName(code) {
   return (state.schedule.rooms && state.schedule.rooms[code]) || code;
 }
 
+/** Where a lesson actually takes place.
+
+    A lesson only names a room when it is somewhere other than usual (a lab).
+    Otherwise the student is in the home classroom of whichever group the
+    lesson came from — which for Γ' changes between the general hours and the
+    orientation hours, so it is worth showing on every row. */
+function lessonRoom(lesson) {
+  if (!lesson) return '';
+  if (lesson.room) return roomName(lesson.room);
+  const group = state.schedule.groups[lesson.group];
+  return (group && group.room) || '';
+}
+
 function esc(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -557,10 +601,11 @@ function esc(value) {
     new section or track next term shows up without touching this file. */
 function pickerModel(grade) {
   const all = Object.values(state.schedule.groups);
-  const used = (g) => g.lessons.length > 0;
-  // A group with no lessons is not a class anyone attends — usually a page the
-  // school exported by mistake — so it is never offered.
-  const offered = (g) => used(g) && !g.hidden;
+  // `hidden` is the converter's call and the only one: it already knows that an
+  // empty page is usually a class exported by mistake, but that an empty
+  // «κόντρα» elective is a real class that just has no hour this week. Second-
+  // guessing it here is how a valid group silently disappears from the picker.
+  const offered = (g) => !g.hidden;
   const byTrack = (kind) => {
     const map = new Map();
     all.filter((g) => g.kind === kind && g.grade === grade && offered(g))
@@ -746,9 +791,15 @@ async function checkForUpdate({ silent }) {
     }
     if (load(KEY_DISMISSED, null) === stamp(candidate)) return;
 
+    // Same version stamp, newer file: the school's timetable has not changed,
+    // the import of it has been corrected. Saying «νέο πρόγραμμα» next to a
+    // version the student can already see in the footer just reads as a bug.
+    const corrected = String(candidate.version) === String(state.schedule.version);
     banner({
       id: 'newdata',
-      text: `Νέο πρόγραμμα (έκδοση ${candidate.version}).`,
+      text: corrected
+        ? 'Διορθωμένο πρόγραμμα — υπάρχει ενημερωμένη έκδοση των ίδιων ωρών.'
+        : `Νέο πρόγραμμα (έκδοση ${candidate.version}).`,
       actionText: 'Ενημέρωση',
       onAction: () => applySchedule(candidate),
     });
@@ -906,6 +957,9 @@ function wire() {
   $('gridToggle').addEventListener('click', () => {
     state.showGrid = !state.showGrid;
     render();
+    // Switching layouts keeps the day the student was looking at, so bring its
+    // column along rather than dropping them at Monday.
+    if (state.showGrid) scrollWeekDayIntoView();
   });
 
   $('checkBtn').addEventListener('click', () => checkForUpdate({ silent: false }));
@@ -933,9 +987,7 @@ function wire() {
     touchX = null;
     if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.8) return;
     const count = state.schedule.days.length;
-    state.weekDay = (state.weekDay + (dx < 0 ? 1 : -1) + count) % count;
-    state.weekDayPinned = true;
-    render();
+    focusWeekDay((state.weekDay + (dx < 0 ? 1 : -1) + count) % count);
   }, { passive: true });
 }
 

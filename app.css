@@ -265,10 +265,20 @@ table.grid tbody th {
   background: var(--surface-2);
   font-weight: 600; white-space: nowrap; width: 76px;
 }
+/* The time column is frozen, so its header has to freeze with it — otherwise
+   every day heading slides out of line with the column under it as soon as the
+   grid is scrolled sideways. Above both neighbours, since it overlaps both. */
+table.grid thead th:first-child { left: 0; z-index: 3; }
+/* The day strip stays live in grid view: all five days are on screen, so the
+   picked one is marked instead of swapped in. Listed before .is-now so a
+   running lesson still stands out inside the picked column. */
+table.grid th.is-picked, table.grid td.is-picked { background: var(--surface-2); }
+table.grid thead th.is-picked { box-shadow: inset 0 -3px 0 var(--accent); }
 table.grid td.is-now { background: var(--now-bg); outline: 2px solid var(--now-edge); outline-offset: -2px; }
 table.grid td.is-conflict { background: var(--warn-bg); }
 .grid__subject { font-weight: 600; }
 .grid__teacher { color: var(--muted); font-size: .92em; }
+.grid__room { color: var(--muted); font-size: .92em; }
 
 /* ---------------------------------------------------------------- banners */
 
