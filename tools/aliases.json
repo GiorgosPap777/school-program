@@ -20,6 +20,7 @@
     "ΠολιτικήΠαιδεία": "Πολιτική Παιδεία",
     "φιλοσοφία": "Φιλοσοφία",
     "Γερμανικά": "Γερμανικά",
+    "Γαλλικά": "Γαλλικά",
     "Γεωμετρία": "Γεωμετρία",
     "Οικονομία": "Οικονομία",
     "Η/Υ": "Εφαρμογές Πληροφορικής",
@@ -118,7 +119,7 @@
     "Γυγ": "Χημείο",
     "Γμαθηματικα1": "Αίθ. 16",
     "Γμαθηματικα2": "Αίθ. 15",
-    "Γιστορια 3": "Αίθ. 14",
+    "Γιστορια3": "Αίθ. 14",
     "Γιστορια4": "Αίθ. 12",
     "Γιστορια5": "Αίθ. 11"
   },
@@ -137,7 +138,7 @@
     "ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗ Σ": "ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗΣ"
   },
   "groupRules": {
-    "_comment": "Ordered regex rules matched against the normalized group label. First match wins. Fields: grade, kind (section|track|kontra|extra), track (display name of the orientation).",
+    "_comment": "Ordered regex rules matched against the normalized group label. First match wins. Fields: grade, kind (section|track|kontra|extra), track (display name of the orientation), parent (capture group holding the class this group belongs to), name (what the picker calls it), parallel (true when the group splits the class for one subject, so its lesson replaces the class's lesson in that hour instead of colliding with it).",
     "rules": [
       {
         "re": "^Α[1-9][0-9]*$",
@@ -203,22 +204,32 @@
         "track": "Μαθηματικά (Κόντρα)"
       },
       {
+        "re": "^([ΑΒΓ][0-9]+|[ΑΒΓ][αθ][0-9]+)εν$",
+        "kind": "extra",
+        "parent": 1,
+        "name": "Ενισχυτική διδασκαλία",
+        "parallel": true
+      },
+      {
         "re": "^([ΑΒΓ][0-9]+)γαλ$",
         "kind": "extra",
         "parent": 1,
-        "name": "Γαλλικά"
+        "name": "Γαλλικά",
+        "parallel": true
       },
       {
         "re": "^([ΑΒΓ][0-9]+)Α$",
         "kind": "extra",
         "parent": 1,
-        "name": "Αγγλικά (2ο τμήμα)"
+        "name": "Αγγλικά (2ο τμήμα)",
+        "parallel": true
       },
       {
         "re": "^([ΑΒΓ][0-9]+)Π$",
         "kind": "extra",
         "parent": 1,
-        "name": "Πληροφορική (2ο τμήμα)"
+        "name": "Πληροφορική (2ο τμήμα)",
+        "parallel": true
       }
     ]
   },

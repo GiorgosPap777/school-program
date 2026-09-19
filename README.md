@@ -124,14 +124,15 @@ so without a bump the old files stay cached on every installed phone.
 2. Regenerate the data:
 
    ```bash
-   python3 tools/pdf2schedule.py "NewProgramme.pdf" -o data/schedule.json --version 2026-11-02 --valid-from 2026-11-02 --valid-to 2026-11-06
+   python3 tools/pdf2schedule.py "NewProgramme.pdf" -o data/schedule.json
    ```
 
 3. **Read `data/report.txt`.** It lists unknown subjects, unclassified groups,
    merged double periods, teacher initials it resolved, hours it corrected
-   against the school's ωράριο, groups with no classroom, and any timetable
-   collisions. A clean report means the import is trustworthy; if something is
-   listed, add it to `tools/aliases.json` and re-run.
+   against the school's ωράριο, groups that replace their class's hour, groups
+   with no classroom, the validity banner it read, and any timetable collisions.
+   A clean report means the import is trustworthy; if something is listed, add
+   it to `tools/aliases.json` and re-run.
 4. Check the invariants still hold:
 
    ```bash
@@ -142,8 +143,11 @@ so without a bump the old files stay cached on every installed phone.
    (see below) — just push the new `data/schedule.json` to that location and every
    installed app will offer the update on its next launch.
 
-`--version` defaults to the creation date printed in the PDF footer, so it can
-usually be omitted.
+No flags are normally needed: `--version` defaults to the creation date in the
+PDF footer, and `--valid-from` / `--valid-to` to the «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ
+21-9-26» banner aSc prints under every grid. Pass them only to override what the
+PDF says. A revision with no end date in the banner simply has no `validTo`, and
+the app's footer reads «ισχύει από …» instead of a range.
 
 ### Publishing updates without redeploying
 
@@ -188,10 +192,10 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 ```jsonc
 {
   "schemaVersion": 1,
-  "version": "2026-09-14",               // compared for update detection
-  "generatedAt": "2026-09-16T11:20:39+00:00",
-  "sourceDate": "2026-09-11",            // the date printed in the PDF footer
-  "validFrom": "2026-09-14", "validTo": "2026-09-18",
+  "version": "2026-09-18",               // compared for update detection
+  "generatedAt": "2026-09-19T07:57:46+00:00",
+  "sourceDate": "2026-09-18",            // the date printed in the PDF footer
+  "validFrom": "2026-09-21", "validTo": null,   // read off the PDF's own banner
   "days": ["Δευτέρα", "…"],
   "periods": [{ "n": 1, "start": "08:10", "end": "08:55" }],
   "rooms": { "ΕΠ": "Εργαστήριο Πληροφορικής" },
@@ -211,7 +215,9 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 ```
 
 `kind` is one of `section` (Α1, Β3, Γ2 …), `track` (Βθ1, Γοικ2, Γθετικό …),
-`kontra` (Γ' electives) or `extra` (second foreign language and similar).
+`kontra` (Γ' electives) or `extra` (ενισχυτική, second foreign language and
+similar). An `extra` may also carry `"parent": "Α2"` — the class it belongs to —
+and `"parallel": true`, which says it splits that class for one subject.
 `d` is a 0-based day index; `p` is a 1-based period number. `teacher` and `room`
 are omitted rather than written as `null` when there is nothing to say. A lesson's
 own `room` means it happens somewhere other than usual; otherwise the student is
@@ -229,6 +235,16 @@ A Β' or Γ' section's page deliberately leaves periods free for the orientation
 track to fill (Β' leaves period 3; Γ' leaves 2–5). Merging is therefore a union of
 the selected groups' lessons. Where two selected groups do claim the same slot, the
 app keeps **both** and marks the slot «Σύγκρουση» rather than silently dropping one.
+
+The one exception is a **split group** (`"parallel": true`). Α2 is taught German
+while Α2γαλ, the other half of the same class, is taught French in the same hour;
+Γ1εν sits with the ενισχυτική teacher while the rest of Γ1 does Γλώσσα with its
+own. A student is in one room, not both, so the split group's lesson replaces the
+class's — and the app says «αντί για Γερμανικά (Α2)» when the subject differs.
+That only happens when the class it splits is *also* selected: tick Γ1εν without
+Γ1 and the overlap is treated as an ordinary collision, because it is one. Every
+replacement is listed in `data/report.txt`, since a careless rule here would
+delete real lessons in silence.
 
 ---
 
@@ -259,8 +275,8 @@ Three things keep it there, all of which are easy to undo by accident:
 - **Background checks are throttled** to once per `CHECK_INTERVAL_MS` (30 min).
   The «Έλεγχος για νέο πρόγραμμα» button ignores the throttle.
 
-Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 76 KB raw and
-4.9 KB gzipped, so serving it uncompressed costs 15× more.
+Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 86 KB raw and
+4.8 KB gzipped, so serving it uncompressed costs 18× more.
 
 ## Testing
 
@@ -285,15 +301,27 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
 
 ## Notes and known limits
 
-- **Period 7** (13:25–14:05) exists in the grid but is unused in the current
-  revision. The app renders only as far as each day's last real lesson.
+- **The PDF says when it starts.** Every page carries a banner —
+  «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ 21-9-26», sometimes with an «εως …» end — and the
+  converter reads `validFrom`/`validTo` from it instead of from a flag that is
+  easy to forget or mistype. The report prints the banner it found.
+- **Class labels are folded to one spelling.** Whoever types the timetable into
+  aSc is not consistent about spaces and it changes between exports: the same
+  κόντρα group was «Γιστορια 3» in one revision and «Γ ιστορια 3» in the next,
+  which read as two different half-empty groups. Spaces never mean anything in a
+  label here, so they are all dropped (as are Latin lookalike letters — `B5` and
+  `Β5`).
+- **A split group replaces its class's hour instead of colliding with it.** See
+  *How the merge works* above; the rule lives in `groupRules` in
+  `tools/aliases.json` as `"parallel": true`, and every replacement it causes is
+  listed in the import report.
 - **Double periods are drawn as one merged cell.** When a class has the same
   lesson two hours running, aSc leaves out the rule between the two columns and
   centres the text across both. Read naively that fills one hour and leaves the
   other looking free — and drops the teacher, who is centred into the *other*
   half. The converter reads the missing rules back out of the drawing commands
   and writes the lesson to every hour the cell spans. The import report lists
-  every merged cell it found (13 in the current revision, all `ΓΛΩ/ΛΟΓ`).
+  every merged cell it found (13 in the current revision, all Γλώσσα/Λογοτεχνία).
 - **Inside a merged cell the teacher is printed as initials** — `ΕΓ`, not
   `ΕΛΕΝΗ ΓΙΑΜΑΛΑΚΗ`. That is the same shape as a room code, so the two can only
   be told apart by lookup: anything that is not a known room is matched against
@@ -312,13 +340,13 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
   its own when it is somewhere else (a lab), and that wins. This matters most for
   Γ΄, who move between their general room and their orientation room during the
   day. A group that can be picked but has no room is flagged by the tests.
-- **Rooms the school does not use are dropped.** `ΕΦΕ` is printed on 13 lessons
+- **Rooms the school does not use are dropped.** `ΕΦΕ` is printed on 14 lessons
   in the PDF but that lab is not actually used, so it is stripped at import via
   `hideRooms.labels` in `tools/aliases.json`; the lessons keep their subject and
   teacher. Remove the code from that list to start showing it again. `ΕΠ`
   (Εργαστήριο Πληροφορικής) is the only room the PDF itself supplies today.
 - **Groups with no lessons are hidden — except «κόντρα» electives.** The current
-  PDF has pages for 15 groups that carry no lessons, including Γ6 and Γ7, which
+  PDF has pages for 14 groups that carry no lessons, including Γ6 and Γ7, which
   are not real classes and were exported by accident. They stay in
   `schedule.json` (so a later revision that fills them just works) but the picker
   never offers them. A κόντρα elective is the exception: it is a real, active

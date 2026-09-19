@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -217,17 +217,29 @@ function buildGrid(schedule, selection) {
   const ids = selectedGroupIds(selection).filter((id) => schedule.groups[id]);
   const grid = schedule.days.map(() => schedule.periods.map(() => null));
   const conflicts = [];
+  const chosen = new Set(ids);
+  // A split group stands in for the class it was split off — and only then. Tick
+  // Γ1εν without Γ1 and it is just another group, so an overlap is a real clash
+  // rather than a licence to delete the other lesson.
+  const standsIn = (g) => !!(g.parallel && g.parent && chosen.has(g.parent));
 
   for (const id of ids) {
     for (const lesson of schedule.groups[id].lessons) {
       const row = grid[lesson.d];
       if (!row || lesson.p < 1 || lesson.p > schedule.periods.length) continue;
-      const entry = { ...lesson, group: id };
+      const entry = { ...lesson, group: id, parallel: standsIn(schedule.groups[id]) };
       const existing = row[lesson.p - 1];
       if (!existing) {
         row[lesson.p - 1] = entry;
       } else if (existing.subject === entry.subject && existing.teacher === entry.teacher) {
         continue;
+      } else if (existing.parallel !== entry.parallel) {
+        // One of the two splits the class for that subject — ενισχυτική, or the
+        // French half of a class whose other half does German. The student sits
+        // in one room, not both, so the split group's lesson is the real one.
+        const [kept, dropped] = entry.parallel ? [entry, existing] : [existing, entry];
+        (kept.replaces = kept.replaces || []).push(dropped);
+        row[lesson.p - 1] = kept;
       } else {
         (existing.clash = existing.clash || []).push(entry);
         conflicts.push({ d: lesson.d, p: lesson.p, a: existing, b: entry });
@@ -449,6 +461,17 @@ function renderDayList(target, dayIdx, status, withHeading) {
       clash = `<p class="conflict">⚠ Σύγκρουση με: ${esc(others)}. Έλεγξε την επιλογή τμήματος.</p>`;
     }
 
+    // Say what the split group replaced, but only when it is not the same
+    // subject — «Γλώσσα αντί για Γλώσσα» is noise, «Γαλλικά αντί για Γερμανικά»
+    // is the whole reason the student ticked that group.
+    let instead = '';
+    const swapped = (lesson && lesson.replaces || [])
+      .filter((r) => r.subject !== lesson.subject)
+      .map((r) => `${r.subject} (${r.group})`);
+    if (swapped.length) {
+      instead = `<p class="slot__instead">αντί για ${esc(swapped.join(', '))}</p>`;
+    }
+
     const li = document.createElement('li');
     li.className = classes.join(' ');
     li.innerHTML = `
@@ -459,7 +482,7 @@ function renderDayList(target, dayIdx, status, withHeading) {
       <div class="slot__body">
         <p class="slot__subject">${esc(lesson ? lesson.subject : 'Κενό')}</p>
         ${meta.length ? `<p class="slot__meta">${meta.map((m) => `<span>${esc(m)}</span>`).join('')}</p>` : ''}
-        ${tag}${clash}
+        ${instead}${tag}${clash}
       </div>`;
     target.appendChild(li);
   }
@@ -554,9 +577,10 @@ function renderWeekGrid(status) {
 
 function renderFooter() {
   const s = state.schedule;
-  const range = s.validFrom && s.validTo
-    ? ` · ισχύει ${formatDay(s.validFrom)}–${formatDay(s.validTo)}`
-    : '';
+  // A revision that runs until further notice has a start but no end date.
+  const range = !s.validFrom ? ''
+    : s.validTo ? ` · ισχύει ${formatDay(s.validFrom)}–${formatDay(s.validTo)}`
+    : ` · ισχύει από ${formatDay(s.validFrom)}`;
   $('footMeta').innerHTML =
     `${esc(s.school || '')}<br>Πρόγραμμα έκδοσης <strong>${esc(s.version)}</strong>${esc(range)}`
     + `<br>Εφαρμογή v${APP_VERSION}${frozen ? ' · <strong>δοκιμαστική ώρα</strong>' : ''}`;
@@ -734,7 +758,7 @@ function chip({ text, sub, on, onClick }) {
 /** Drop references to groups an updated schedule no longer contains. */
 function pruneSelection(selection, schedule) {
   if (!selection) return null;
-  const alive = (id) => id && schedule.groups[id];
+  const alive = (id) => !!(id && schedule.groups[id] && !schedule.groups[id].hidden);
   const next = {
     grade: selection.grade,
     section: alive(selection.section) ? selection.section : null,

@@ -154,18 +154,45 @@ def main(path):
         assert doubles >= 13, \
             "only %d consecutive same-subject pairs — merged cells look dropped" % doubles
 
-    @check("every group that actually meets says which room it is in")
+    @check("every class that actually meets says which room it is in")
     def _():
-        # A «κόντρα» elective with no hour this week has nowhere to be, so it is
-        # allowed to have no room yet. The moment a revision gives it an hour,
-        # this starts demanding one.
+        # The school's noticeboard gives a home classroom to every section and
+        # every orientation group, so those must have one the moment they have
+        # an hour. A «κόντρα» elective with no hour this week has nowhere to be
+        # yet; and a split group (ενισχυτική, Γαλλικά) follows its teacher
+        # rather than owning a room — the PDF prints no room for those lessons
+        # either. Both are reported, not failed.
+        homed = ("section", "track")
         missing = sorted(n for n, g in groups.items()
-                         if not g["hidden"] and g["lessons"] and not g.get("room"))
+                         if not g["hidden"] and g["lessons"]
+                         and g["kind"] in homed and not g.get("room"))
         assert not missing, "no room for %s — add them to aliases.json groupRooms" \
             % ", ".join(missing)
         blank = sorted(n for n, g in groups.items() if not g["hidden"] and not g.get("room"))
         if blank:
             print("    note: no room on the noticeboard yet for %s" % ", ".join(blank))
+
+    @check("a split group names the class it stands in for")
+    def _():
+        # A «parallel» group takes the place of its class's lesson in the app.
+        # If its parent is wrong or missing the app either deletes the wrong
+        # lesson or quietly stops replacing at all, and neither shows up as an
+        # error — so pin the link down here.
+        for name, g in groups.items():
+            if not g.get("parallel"):
+                continue
+            parent = g.get("parent")
+            assert parent, "%s replaces a class but names none" % name
+            assert parent in groups, "%s stands in for %s, which has no page" \
+                % (name, parent)
+            assert groups[parent]["grade"] == g["grade"], \
+                "%s is %s΄ but stands in for %s΄ %s" \
+                % (name, g["grade"], groups[parent]["grade"], parent)
+        live = sorted(n for n, g in groups.items()
+                      if g.get("parallel") and g["lessons"])
+        if live:
+            print("    note: groups that replace their class's hour: %s"
+                  % ", ".join(live))
 
     @check("every group is classified and grade-tagged")
     def _():

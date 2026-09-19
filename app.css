@@ -192,6 +192,8 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 .slot--free .slot__subject { font-weight: 500; color: var(--muted); }
 .slot__meta { font-size: .85rem; color: var(--muted); margin-top: 2px; }
 .slot__meta span + span::before { content: " · "; }
+/* A split group («εν», Γαλλικά) takes the place of the class's own lesson. */
+.slot__instead { font-size: .8rem; color: var(--muted); margin-top: 4px; font-style: italic; }
 
 .tag {
   display: inline-block;

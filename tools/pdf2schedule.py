@@ -35,6 +35,12 @@ SUBJECT_MIN_SIZE = 20.0          # anything this big is subject text
 ROOM_RE = re.compile(r"^[Α-ΩΆΈΉΊΌΎΏ]{2,3}$")   # room codes look like ΕΠ / ΕΦΕ
 GRADE_SUFFIX_RE = re.compile(r"\s*[ΑΒΓ]$")     # trailing grade letter on subjects
 
+# Every page carries a banner saying when the timetable starts, and sometimes
+# when it stops: «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ 21-9-26», «... ΑΠΟ 14-9-26εως 18-9-26».
+# Reading it here means the dates cannot be forgotten on the command line.
+VALIDITY_RE = re.compile(r"ΑΠΟ\s*(\d{1,2})-(\d{1,2})-(\d{2,4})"
+                         r"(?:\s*εως\s*(\d{1,2})-(\d{1,2})-(\d{2,4}))?")
+
 
 class ConversionError(Exception):
     pass
@@ -304,8 +310,22 @@ def collapse(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def iso_date(day: str, month: str, year: str) -> str:
+    """'21', '9', '26' -> '2026-09-21'. aSc writes the year two digits wide."""
+    y = int(year)
+    return "%04d-%02d-%02d" % (y + 2000 if y < 100 else y, int(month), int(day))
+
+
 def normalise_label(label: str) -> str:
-    return collapse(label).translate(LATIN_TO_GREEK)
+    """Fold a class label onto a single spelling.
+
+    Whoever types the timetable into aSc is not consistent about spaces, and it
+    changes between exports: the same κόντρα group was «Γιστορια 3» in one
+    revision and «Γ ιστορια 3» in the next. A space never carries meaning in a
+    class label here, so drop them all and the two spellings become one group
+    instead of two half-empty ones.
+    """
+    return re.sub(r"\s+", "", label).translate(LATIN_TO_GREEK)
 
 
 GREEK_WORD_RE = re.compile(r"[Α-ΩΆΈΉΊΌΎΏ][Α-ΩΆΈΉΊΌΎΏα-ωάέήίόύώΐΰϊϋ]*")
@@ -427,6 +447,8 @@ class Report:
         self.empty_kontra = []
         self.roomless_groups = set()
         self.retimed = []
+        self.parallel = []
+        self.validity = None
 
     def ok(self) -> bool:
         return not (self.unknown_subjects or self.unclassified_groups or self.warnings)
@@ -458,6 +480,8 @@ class Report:
                  for k, v in sorted(self.dropped_rooms.items())])
         section("ΩΡΕΣ ΠΟΥ ΔΙΟΡΘΩΘΗΚΑΝ ΑΠΟ ΤΟ ΩΡΑΡΙΟ ΤΟΥ ΣΧΟΛΕΙΟΥ", self.retimed)
         section("ΕΝΩΜΕΝΑ ΚΕΛΙΑ — ΔΙΩΡΑ (γράφτηκαν και στις δύο ώρες)", self.merged)
+        section("ΧΩΡΙΣΤΕΣ ΟΜΑΔΕΣ — ΑΝΤΙΚΑΘΙΣΤΟΥΝ ΤΗΝ ΩΡΑ ΤΟΥ ΤΜΗΜΑΤΟΣ",
+                self.parallel)
         section("ΑΡΧΙΚΑ ΚΑΘΗΓΗΤΩΝ ΠΟΥ ΑΝΑΓΝΩΡΙΣΤΗΚΑΝ", self.resolved_initials)
         section("ΑΤΑΞΙΝΟΜΗΤΕΣ ΟΜΑΔΕΣ", self.unclassified_groups)
         section("ΟΜΑΔΕΣ ΧΩΡΙΣ ΑΙΘΟΥΣΑ (πρόσθεσέ τες στο groupRooms όταν τη μάθεις)",
@@ -470,6 +494,9 @@ class Report:
                 self.excluded)
         section("ΠΡΟΕΙΔΟΠΟΙΗΣΕΙΣ", self.warnings)
         section("ΣΥΓΚΡΟΥΣΕΙΣ ΩΡΩΝ (γενικό x κατεύθυνση)", self.collisions)
+        lines.append("")
+        lines.append("ΙΣΧΥΣ (από το banner του PDF): %s"
+                     % (self.validity or "δεν βρέθηκε"))
         lines.append("")
         return "\n".join(lines)
 
@@ -591,6 +618,7 @@ def build(pdf_path: str, args) -> tuple:
     groups = {}
     periods = None
     footer_date = None
+    valid_from = valid_to = None
 
     for page_num in pdf.page_objects():
         items, content = extract_items(pdf, page_num)
@@ -603,6 +631,15 @@ def build(pdf_path: str, args) -> tuple:
                 if m:
                     footer_date = "%s-%02d-%02d" % (m.group(3), int(m.group(2)),
                                                     int(m.group(1)))
+                    break
+        if valid_from is None:
+            for it in items:
+                m = VALIDITY_RE.search(it["text"])
+                if m:
+                    valid_from = iso_date(m.group(1), m.group(2), m.group(3))
+                    if m.group(4):
+                        valid_to = iso_date(m.group(4), m.group(5), m.group(6))
+                    report.validity = collapse(it["text"])
                     break
         label, lessons, page_periods = parse_page(items, content, norm, report)
         if label is None:
@@ -638,7 +675,7 @@ def build(pdf_path: str, args) -> tuple:
             "hidden": hidden,
             "lessons": lessons,
         }
-        for key in ("track", "name", "parent"):
+        for key in ("track", "name", "parent", "parallel"):
             if info.get(key):
                 group[key] = info[key]
         room = norm.group_rooms.get(label)
@@ -689,6 +726,28 @@ def build(pdf_path: str, args) -> tuple:
                         % (sec["label"], ov["label"], DAY_NAMES[key[0]], key[1],
                            taken[key], lesson["subject"]))
 
+    # A «parallel» group splits the class for one subject: its students spend
+    # that hour with a different teacher. The app keeps the split group's lesson
+    # and drops the section's, so every swap is listed here — a careless rule in
+    # aliases.json would otherwise quietly delete real lessons.
+    by_label = {g["label"]: g for g in groups.values()}
+    for g in live:
+        if not g.get("parallel"):
+            continue
+        parent = by_label.get(g.get("parent") or "")
+        if parent is None:
+            report.warnings.append("η ομάδα «%s» αντικαθιστά τμήμα που λείπει"
+                                   % g["label"])
+            continue
+        taken = {(l["d"], l["p"]): l for l in parent["lessons"]}
+        for lesson in g["lessons"]:
+            was = taken.get((lesson["d"], lesson["p"]))
+            report.parallel.append(
+                "%s %s ώρα %d: %s αντί για %s"
+                % (g["label"], DAY_NAMES[lesson["d"]], lesson["p"],
+                   lesson["subject"],
+                   was["subject"] if was else "κενό — πρόσθετη ώρα"))
+
     short = {k: v for k, v in aliases["subjectShort"].items() if not k.startswith("_")}
     used_subjects = {l["subject"] for g in groups.values() for l in g["lessons"]}
     rooms = {k: v for k, v in aliases["rooms"].items() if not k.startswith("_")}
@@ -699,8 +758,8 @@ def build(pdf_path: str, args) -> tuple:
         "version": args.version or footer_date or datetime.now().strftime("%Y-%m-%d"),
         "generatedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "sourceDate": footer_date,
-        "validFrom": args.valid_from,
-        "validTo": args.valid_to,
+        "validFrom": args.valid_from or valid_from,
+        "validTo": args.valid_to or valid_to,
         "school": args.school,
         "sourceFile": os.path.basename(pdf_path),
         "days": DAY_NAMES,
@@ -718,8 +777,8 @@ def main(argv=None):
     ap.add_argument("pdf", help="the aSc Timetables PDF export")
     ap.add_argument("-o", "--output", default="data/schedule.json")
     ap.add_argument("--version", help="version stamp (default: the PDF's own date)")
-    ap.add_argument("--valid-from", help="first day this schedule applies, YYYY-MM-DD")
-    ap.add_argument("--valid-to", help="last day this schedule applies, YYYY-MM-DD")
+    ap.add_argument("--valid-from", help="override the «ΑΠΟ …» banner in the PDF")
+    ap.add_argument("--valid-to", help="override the «… εως …» banner in the PDF")
     ap.add_argument("--school", default="7ο ΓΕΝΙΚΟ ΛΥΚΕΙΟ ΗΡΑΚΛΕΙΟΥ ΚΡΗΤΗΣ")
     ap.add_argument("--report", help="where to write the report "
                                      "(default: alongside the output)")
