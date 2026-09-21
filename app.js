@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -224,10 +224,14 @@ function buildGrid(schedule, selection) {
   const standsIn = (g) => !!(g.parallel && g.parent && chosen.has(g.parent));
 
   for (const id of ids) {
-    for (const lesson of schedule.groups[id].lessons) {
+    const group = schedule.groups[id];
+    // A τμήμα ένταξης adds a name to an hour, never an hour of its own; it is
+    // merged in below, once the rest of the week has settled.
+    if (group.coteach) continue;
+    for (const lesson of group.lessons) {
       const row = grid[lesson.d];
       if (!row || lesson.p < 1 || lesson.p > schedule.periods.length) continue;
-      const entry = { ...lesson, group: id, parallel: standsIn(schedule.groups[id]) };
+      const entry = { ...lesson, group: id, parallel: standsIn(group) };
       const existing = row[lesson.p - 1];
       if (!existing) {
         row[lesson.p - 1] = entry;
@@ -246,7 +250,35 @@ function buildGrid(schedule, selection) {
       }
     }
   }
+
+  // Nobody leaves the room for a τμήμα ένταξης: a second teacher simply walks
+  // in for that hour. So these are never picked — they ride along with the
+  // class — and all they do is add a name. An hour the class has free is nothing
+  // to join, and an hour another group took over is a room this student is not
+  // sitting in; both are skipped rather than invented.
+  for (const g of Object.values(schedule.groups)) {
+    if (!g.coteach || !g.parent || !chosen.has(g.parent)) continue;
+    for (const lesson of g.lessons) {
+      if (!lesson.teacher) continue;
+      const slot = (grid[lesson.d] || [])[lesson.p - 1];
+      if (!slot || slot.group !== g.parent || slot.teacher === lesson.teacher) continue;
+      slot.with = slot.with || [];
+      if (!slot.with.includes(lesson.teacher)) slot.with.push(lesson.teacher);
+    }
+  }
   return { grid, conflicts };
+}
+
+/** Everyone in the room for a lesson: the class's own teacher first, then
+    whoever joins them for that hour. */
+function teachers(lesson) {
+  return [lesson.teacher].concat(lesson.with || []).filter(Boolean);
+}
+
+/** The same names as HTML, the joining ones set smaller beside the first. */
+function teacherHtml(lesson) {
+  return esc(lesson.teacher || '')
+    + (lesson.with || []).map((t) => `<small class="with">${esc(t)}</small>`).join('');
 }
 
 function selectedGroupIds(selection) {
@@ -395,10 +427,11 @@ function renderStatusCard(date, status, rolled, listedDay) {
     const alsoNow = live.clash
       ? `<p class="conflict">⚠ Και ταυτόχρονα: ${esc(live.clash.map((c) => c.subject).join(', '))}</p>`
       : '';
+    const who = teachers(live).join(' + ');
     card.innerHTML = dayLine
       + headline(live.subject)
       + detail(`${status.current + 1}η ώρα · λήγει ${durationText(bound.end - status.mins)}`
-        + (live.teacher ? ` · ${live.teacher}` : '')
+        + (who ? ` · ${who}` : '')
         + (lessonRoom(live) ? ` · ${lessonRoom(live)}` : ''))
       + `<div class="bar"><div class="bar__fill" style="width:${pct.toFixed(1)}%"></div></div>`
       + alsoNow;
@@ -448,7 +481,7 @@ function renderDayList(target, dayIdx, status, withHeading) {
     else if (kind === 'next' && lesson) classes.push('slot--next');
 
     const meta = lesson
-      ? [lesson.teacher, lessonRoom(lesson), lesson.group].filter(Boolean)
+      ? [teacherHtml(lesson), esc(lessonRoom(lesson)), esc(lesson.group)].filter(Boolean)
       : [];
 
     let tag = '';
@@ -481,7 +514,7 @@ function renderDayList(target, dayIdx, status, withHeading) {
       </div>
       <div class="slot__body">
         <p class="slot__subject">${esc(lesson ? lesson.subject : 'Κενό')}</p>
-        ${meta.length ? `<p class="slot__meta">${meta.map((m) => `<span>${esc(m)}</span>`).join('')}</p>` : ''}
+        ${meta.length ? `<p class="slot__meta">${meta.map((m) => `<span>${m}</span>`).join('')}</p>` : ''}
         ${instead}${tag}${clash}
       </div>`;
     target.appendChild(li);
@@ -564,7 +597,8 @@ function renderWeekGrid(status) {
       html += `<td${cls.length ? ` class="${cls.join(' ')}"` : ''}>`;
       if (lesson) {
         html += `<div class="grid__subject">${esc(shortSubject(lesson.subject))}</div>`;
-        if (lesson.teacher) html += `<div class="grid__teacher">${esc(lesson.teacher)}</div>`;
+        const who = teacherHtml(lesson);
+        if (who) html += `<div class="grid__teacher">${who}</div>`;
         const where = lessonRoom(lesson);
         if (where) html += `<div class="grid__room">${esc(where)}</div>`;
       }
@@ -623,13 +657,20 @@ function esc(value) {
 
 /** Everything the picker offers, derived from the data — never hardcoded, so a
     new section or track next term shows up without touching this file. */
-function pickerModel(grade) {
+function pickerModel(grade, chosen) {
   const all = Object.values(state.schedule.groups);
   // `hidden` is the converter's call and the only one: it already knows that an
   // empty page is usually a class exported by mistake, but that an empty
   // «κόντρα» elective is a real class that just has no hour this week. Second-
   // guessing it here is how a valid group silently disappears from the picker.
   const offered = (g) => !g.hidden;
+  // An extra that splits one class — the French half of Α2, its second English
+  // group — is only a choice for someone in that class; to anyone else it is a
+  // stranger's timetable. A τμήμα ένταξης is never a choice at all: the student
+  // stays in the room and a second teacher joins them, so it rides along with
+  // the class instead of being ticked.
+  const reachable = new Set([chosen && chosen.section, chosen && chosen.track].filter(Boolean));
+  const mine = (g) => !g.coteach && (!g.parent || reachable.has(g.parent));
   const byTrack = (kind) => {
     const map = new Map();
     all.filter((g) => g.kind === kind && g.grade === grade && offered(g))
@@ -647,7 +688,7 @@ function pickerModel(grade) {
       .sort((a, b) => a.label.localeCompare(b.label, 'el')),
     tracks: byTrack('track'),
     kontra: byTrack('kontra'),
-    extras: all.filter((g) => g.kind === 'extra' && offered(g) && g.grade === grade),
+    extras: all.filter((g) => g.kind === 'extra' && offered(g) && g.grade === grade && mine(g)),
   };
 }
 
@@ -661,7 +702,10 @@ function openPicker() {
 
 function renderPicker() {
   const draft = state.draft;
-  const model = pickerModel(draft.grade);
+  const model = pickerModel(draft.grade, draft);
+  // Moving to another class takes that class's own groups with it.
+  const onOffer = new Set(model.extras.map((g) => g.label));
+  draft.extras = (draft.extras || []).filter((id) => onOffer.has(id));
   const body = $('pickerBody');
   body.innerHTML = '';
 
@@ -711,7 +755,8 @@ function renderPicker() {
   }
 
   if (model.extras.length) {
-    body.appendChild(field('Επιπλέον ομάδες', 'Προαιρετικό — π.χ. δεύτερη ξένη γλώσσα.',
+    body.appendChild(field(draft.section ? `Ομάδες του ${draft.section}` : 'Επιπλέον ομάδες',
+      'Προαιρετικό — τσέκαρέ το μόνο αν ανήκεις σε αυτή την ομάδα.',
       model.extras.map((g) => chip({
         text: g.label,
         sub: g.name || g.track,
@@ -764,8 +809,15 @@ function pruneSelection(selection, schedule) {
     section: alive(selection.section) ? selection.section : null,
     track: alive(selection.track) ? selection.track : null,
     kontra: alive(selection.kontra) ? selection.kontra : null,
-    extras: (selection.extras || []).filter(alive),
+    extras: [],
   };
+  // Same rule as the picker, applied to what was saved earlier: an extra tied
+  // to a class outlives neither a move to another class nor a version of the
+  // app that stopped offering it.
+  const reachable = new Set([next.section, next.track].filter(Boolean));
+  next.extras = (selection.extras || []).filter((id) => alive(id)
+    && !schedule.groups[id].coteach
+    && (!schedule.groups[id].parent || reachable.has(schedule.groups[id].parent)));
   return next.section ? next : null;
 }
 

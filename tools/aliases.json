@@ -138,7 +138,7 @@
     "ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗ Σ": "ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗΣ"
   },
   "groupRules": {
-    "_comment": "Ordered regex rules matched against the normalized group label. First match wins. Fields: grade, kind (section|track|kontra|extra), track (display name of the orientation), parent (capture group holding the class this group belongs to), name (what the picker calls it), parallel (true when the group splits the class for one subject, so its lesson replaces the class's lesson in that hour instead of colliding with it).",
+    "_comment": "Ordered regex rules matched against the normalized group label. First match wins. Fields: grade, kind (section|track|kontra|extra), track (display name of the orientation), parent (capture group holding the class this group belongs to), name (what the picker calls it), parallel (true when the group splits the class for one subject, so its lesson replaces the class's lesson in that hour instead of colliding with it), coteach (true when nobody leaves the room and a second teacher simply joins the class for that hour — the group is never offered in the picker; its teacher is added to the class's own lesson).",
     "rules": [
       {
         "re": "^Α[1-9][0-9]*$",
@@ -207,8 +207,8 @@
         "re": "^([ΑΒΓ][0-9]+|[ΑΒΓ][αθ][0-9]+)εν$",
         "kind": "extra",
         "parent": 1,
-        "name": "Ενισχυτική διδασκαλία",
-        "parallel": true
+        "name": "Τμήμα ένταξης",
+        "coteach": true
       },
       {
         "re": "^([ΑΒΓ][0-9]+)γαλ$",
@@ -258,6 +258,9 @@
   },
   "excludeGroups": {
     "_comment": "Groups to keep out of the app even if the PDF has a page for them — e.g. a class that does not exist and was exported by mistake. Groups with no lessons at all are hidden automatically, except «κόντρα» electives: those are real, active classes that simply may have no hour in a given week, so list one here to hide it.",
-    "labels": []
+    "labels": [
+      "Γιστορια6",
+      "Γμαθηματικα3"
+    ]
   }
 }

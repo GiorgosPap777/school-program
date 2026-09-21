@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "version": "2026-09-18",
- "generatedAt": "2026-09-19T07:57:46+00:00",
+ "generatedAt": "2026-09-21T09:46:01+00:00",
  "sourceDate": "2026-09-18",
  "validFrom": "2026-09-21",
  "validTo": null,
@@ -532,9 +532,9 @@
      "teacher": "ΓΙΩΡΓΟΣ ΠΑΠΑΡΓΥΡΙΟΥ"
     }
    ],
-   "name": "Ενισχυτική διδασκαλία",
+   "name": "Τμήμα ένταξης",
    "parent": "Α2",
-   "parallel": true
+   "coteach": true
   },
   "Α3": {
    "label": "Α3",
@@ -1547,9 +1547,9 @@
      "teacher": "ΓΙΩΡΓΟΣ ΠΑΠΑΡΓΥΡΙΟΥ"
     }
    ],
-   "name": "Ενισχυτική διδασκαλία",
+   "name": "Τμήμα ένταξης",
    "parent": "Β2",
-   "parallel": true
+   "coteach": true
   },
   "Β3": {
    "label": "Β3",
@@ -2145,9 +2145,9 @@
      "teacher": "ΓΙΩΡΓΟΣ ΠΑΠΑΡΓΥΡΙΟΥ"
     }
    ],
-   "name": "Ενισχυτική διδασκαλία",
+   "name": "Τμήμα ένταξης",
    "parent": "Β5",
-   "parallel": true
+   "coteach": true
   },
   "ΒΑ1": {
    "label": "ΒΑ1",
@@ -2268,9 +2268,9 @@
      "teacher": "ΓΙΩΡΓΟΣ ΠΑΠΑΡΓΥΡΙΟΥ"
     }
    ],
-   "name": "Ενισχυτική διδασκαλία",
+   "name": "Τμήμα ένταξης",
    "parent": "Βα2",
-   "parallel": true
+   "coteach": true
   },
   "Βθ1": {
    "label": "Βθ1",
@@ -2498,9 +2498,9 @@
      "teacher": "ΓΙΩΡΓΟΣ ΠΑΠΑΡΓΥΡΙΟΥ"
     }
    ],
-   "name": "Ενισχυτική διδασκαλία",
+   "name": "Τμήμα ένταξης",
    "parent": "Γ1",
-   "parallel": true
+   "coteach": true
   },
   "Γ2": {
    "label": "Γ2",
@@ -3272,7 +3272,7 @@
    "label": "Γιστορια6",
    "grade": "Γ",
    "kind": "kontra",
-   "hidden": false,
+   "hidden": true,
    "lessons": [],
    "track": "Ιστορία (Κόντρα)"
   },
@@ -3324,7 +3324,7 @@
    "label": "Γμαθηματικα3",
    "grade": "Γ",
    "kind": "kontra",
-   "hidden": false,
+   "hidden": true,
    "lessons": [],
    "track": "Μαθηματικά (Κόντρα)"
   },

@@ -159,40 +159,64 @@ def main(path):
         # The school's noticeboard gives a home classroom to every section and
         # every orientation group, so those must have one the moment they have
         # an hour. A «κόντρα» elective with no hour this week has nowhere to be
-        # yet; and a split group (ενισχυτική, Γαλλικά) follows its teacher
-        # rather than owning a room — the PDF prints no room for those lessons
-        # either. Both are reported, not failed.
+        # yet; and a split group (Γαλλικά) follows its teacher rather than
+        # owning a room — the PDF prints no room for those lessons either.
+        # Both are reported, not failed. A τμήμα ένταξης sits in the class's
+        # own room and is checked for having none of its own further down.
         homed = ("section", "track")
         missing = sorted(n for n, g in groups.items()
                          if not g["hidden"] and g["lessons"]
                          and g["kind"] in homed and not g.get("room"))
         assert not missing, "no room for %s — add them to aliases.json groupRooms" \
             % ", ".join(missing)
-        blank = sorted(n for n, g in groups.items() if not g["hidden"] and not g.get("room"))
+        blank = sorted(n for n, g in groups.items()
+                       if not g["hidden"] and not g.get("room") and not g.get("coteach"))
         if blank:
             print("    note: no room on the noticeboard yet for %s" % ", ".join(blank))
 
-    @check("a split group names the class it stands in for")
+    @check("a group tied to a class names the class it is tied to")
     def _():
-        # A «parallel» group takes the place of its class's lesson in the app.
-        # If its parent is wrong or missing the app either deletes the wrong
-        # lesson or quietly stops replacing at all, and neither shows up as an
-        # error — so pin the link down here.
+        # Both kinds lean on `parent`. A «parallel» group takes the place of its
+        # class's lesson; a «coteach» group adds a second teacher to it and is
+        # never offered in the picker. Either way, a wrong or missing parent
+        # makes the app delete the wrong lesson or quietly stop merging, and
+        # neither shows up as an error — so pin the link down here.
         for name, g in groups.items():
-            if not g.get("parallel"):
+            if not (g.get("parallel") or g.get("coteach")):
                 continue
+            assert not (g.get("parallel") and g.get("coteach")), \
+                "%s cannot both replace its class's hour and sit in on it" % name
             parent = g.get("parent")
-            assert parent, "%s replaces a class but names none" % name
-            assert parent in groups, "%s stands in for %s, which has no page" \
+            assert parent, "%s is tied to a class but names none" % name
+            assert parent in groups, "%s is tied to %s, which has no page" \
                 % (name, parent)
             assert groups[parent]["grade"] == g["grade"], \
-                "%s is %s΄ but stands in for %s΄ %s" \
+                "%s is %s΄ but is tied to %s΄ %s" \
                 % (name, g["grade"], groups[parent]["grade"], parent)
         live = sorted(n for n, g in groups.items()
                       if g.get("parallel") and g["lessons"])
         if live:
             print("    note: groups that replace their class's hour: %s"
                   % ", ".join(live))
+
+    @check("a τμήμα ένταξης only ever adds a teacher to an hour the class has")
+    def _():
+        # The app merges a coteach group's teacher into the class's own lesson
+        # and shows nothing at all for an hour the class has free. That is the
+        # right call — it must not invent a lesson — but it does mean those
+        # hours vanish, so count them here rather than letting them go unseen.
+        stray = []
+        for name, g in groups.items():
+            if not g.get("coteach"):
+                continue
+            assert not g.get("room"), \
+                "%s has a room of its own, but it sits in the class's room" % name
+            held = {(l["d"], l["p"]) for l in groups[g["parent"]]["lessons"]}
+            stray += ["%s %s.%d" % (name, data["days"][l["d"]], l["p"]) for l in g["lessons"]
+                      if (l["d"], l["p"]) not in held]
+        if stray:
+            print("    note: ένταξη hours with no lesson in the class to join: %s"
+                  % ", ".join(stray))
 
     @check("every group is classified and grade-tagged")
     def _():

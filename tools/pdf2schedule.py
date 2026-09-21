@@ -448,6 +448,7 @@ class Report:
         self.roomless_groups = set()
         self.retimed = []
         self.parallel = []
+        self.coteach = []
         self.validity = None
 
     def ok(self) -> bool:
@@ -482,6 +483,8 @@ class Report:
         section("ΕΝΩΜΕΝΑ ΚΕΛΙΑ — ΔΙΩΡΑ (γράφτηκαν και στις δύο ώρες)", self.merged)
         section("ΧΩΡΙΣΤΕΣ ΟΜΑΔΕΣ — ΑΝΤΙΚΑΘΙΣΤΟΥΝ ΤΗΝ ΩΡΑ ΤΟΥ ΤΜΗΜΑΤΟΣ",
                 self.parallel)
+        section("ΤΜΗΜΑΤΑ ΕΝΤΑΞΗΣ — ΔΕΥΤΕΡΟΣ ΚΑΘΗΓΗΤΗΣ ΣΤΗΝ ΙΔΙΑ ΩΡΑ",
+                self.coteach)
         section("ΑΡΧΙΚΑ ΚΑΘΗΓΗΤΩΝ ΠΟΥ ΑΝΑΓΝΩΡΙΣΤΗΚΑΝ", self.resolved_initials)
         section("ΑΤΑΞΙΝΟΜΗΤΕΣ ΟΜΑΔΕΣ", self.unclassified_groups)
         section("ΟΜΑΔΕΣ ΧΩΡΙΣ ΑΙΘΟΥΣΑ (πρόσθεσέ τες στο groupRooms όταν τη μάθεις)",
@@ -675,7 +678,7 @@ def build(pdf_path: str, args) -> tuple:
             "hidden": hidden,
             "lessons": lessons,
         }
-        for key in ("track", "name", "parent", "parallel"):
+        for key in ("track", "name", "parent", "parallel", "coteach"):
             if info.get(key):
                 group[key] = info[key]
         room = norm.group_rooms.get(label)
@@ -730,23 +733,38 @@ def build(pdf_path: str, args) -> tuple:
     # that hour with a different teacher. The app keeps the split group's lesson
     # and drops the section's, so every swap is listed here — a careless rule in
     # aliases.json would otherwise quietly delete real lessons.
+    #
+    # A «coteach» group does not split anything: the τμήμα ένταξης teacher walks
+    # into the same room for that hour, so the app only adds their name to the
+    # class's own lesson. An hour where the class has nothing scheduled is
+    # therefore nothing the app can show, and is listed here to be noticed.
     by_label = {g["label"]: g for g in groups.values()}
     for g in live:
-        if not g.get("parallel"):
+        if not (g.get("parallel") or g.get("coteach")):
             continue
         parent = by_label.get(g.get("parent") or "")
         if parent is None:
-            report.warnings.append("η ομάδα «%s» αντικαθιστά τμήμα που λείπει"
-                                   % g["label"])
+            report.warnings.append(
+                "η ομάδα «%s» δείχνει σε τμήμα που λείπει" % g["label"])
             continue
         taken = {(l["d"], l["p"]): l for l in parent["lessons"]}
         for lesson in g["lessons"]:
             was = taken.get((lesson["d"], lesson["p"]))
-            report.parallel.append(
-                "%s %s ώρα %d: %s αντί για %s"
-                % (g["label"], DAY_NAMES[lesson["d"]], lesson["p"],
-                   lesson["subject"],
-                   was["subject"] if was else "κενό — πρόσθετη ώρα"))
+            if g.get("coteach"):
+                report.coteach.append(
+                    "%s %s ώρα %d: %s %s"
+                    % (g["label"], DAY_NAMES[lesson["d"]], lesson["p"],
+                       lesson["teacher"] or "χωρίς καθηγητή",
+                       "μαζί με %s (%s)" % (was["teacher"] or "—", was["subject"])
+                       if was else
+                       "— το %s δεν έχει μάθημα αυτή την ώρα, δεν εμφανίζεται"
+                       % parent["label"]))
+            else:
+                report.parallel.append(
+                    "%s %s ώρα %d: %s αντί για %s"
+                    % (g["label"], DAY_NAMES[lesson["d"]], lesson["p"],
+                       lesson["subject"],
+                       was["subject"] if was else "κενό — πρόσθετη ώρα"))
 
     short = {k: v for k, v in aliases["subjectShort"].items() if not k.startswith("_")}
     used_subjects = {l["subject"] for g in groups.values() for l in g["lessons"]}

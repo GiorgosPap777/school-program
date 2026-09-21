@@ -129,8 +129,9 @@ so without a bump the old files stay cached on every installed phone.
 
 3. **Read `data/report.txt`.** It lists unknown subjects, unclassified groups,
    merged double periods, teacher initials it resolved, hours it corrected
-   against the school's ωράριο, groups that replace their class's hour, groups
-   with no classroom, the validity banner it read, and any timetable collisions.
+   against the school's ωράριο, groups that replace their class's hour, τμήματα
+   ένταξης and whose lesson each one joins, groups with no classroom, the
+   validity banner it read, and any timetable collisions.
    A clean report means the import is trustworthy; if something is listed, add
    it to `tools/aliases.json` and re-run.
 4. Check the invariants still hold:
@@ -215,9 +216,11 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 ```
 
 `kind` is one of `section` (Α1, Β3, Γ2 …), `track` (Βθ1, Γοικ2, Γθετικό …),
-`kontra` (Γ' electives) or `extra` (ενισχυτική, second foreign language and
+`kontra` (Γ' electives) or `extra` (τμήμα ένταξης, second foreign language and
 similar). An `extra` may also carry `"parent": "Α2"` — the class it belongs to —
-and `"parallel": true`, which says it splits that class for one subject.
+and then one of two flags: `"parallel": true` says it splits that class for one
+subject, `"coteach": true` says it does not split anything and a second teacher
+joins that class for the hour.
 `d` is a 0-based day index; `p` is a 1-based period number. `teacher` and `room`
 are omitted rather than written as `null` when there is nothing to say. A lesson's
 own `room` means it happens somewhere other than usual; otherwise the student is
@@ -236,15 +239,28 @@ track to fill (Β' leaves period 3; Γ' leaves 2–5). Merging is therefore a un
 the selected groups' lessons. Where two selected groups do claim the same slot, the
 app keeps **both** and marks the slot «Σύγκρουση» rather than silently dropping one.
 
-The one exception is a **split group** (`"parallel": true`). Α2 is taught German
-while Α2γαλ, the other half of the same class, is taught French in the same hour;
-Γ1εν sits with the ενισχυτική teacher while the rest of Γ1 does Γλώσσα with its
-own. A student is in one room, not both, so the split group's lesson replaces the
-class's — and the app says «αντί για Γερμανικά (Α2)» when the subject differs.
-That only happens when the class it splits is *also* selected: tick Γ1εν without
-Γ1 and the overlap is treated as an ordinary collision, because it is one. Every
-replacement is listed in `data/report.txt`, since a careless rule here would
-delete real lessons in silence.
+Two kinds of group are exceptions, and both hang off `parent`.
+
+A **split group** (`"parallel": true`) really does take students out of the room:
+Α2 is taught German while Α2γαλ, the other half of the same class, is taught
+French in the same hour. A student is in one room, not both, so the split group's
+lesson replaces the class's — and the app says «αντί για Γερμανικά (Α2)» when the
+subject differs. That only happens when the class it splits is *also* selected:
+tick Α2γαλ without Α2 and the overlap is treated as an ordinary collision, because
+it is one. Every replacement is listed in `data/report.txt`, since a careless rule
+here would delete real lessons in silence.
+
+A **τμήμα ένταξης** (`"coteach": true`) is the opposite: nobody leaves, a second
+teacher simply walks into the same room for that hour. So Γ1εν is never offered in
+the picker at all — it rides along with Γ1 — and all it does is add a name beside
+the class's own teacher, set smaller: «ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗΣ + ΓΙΩΡΓΟΣ
+ΠΑΠΑΡΓΥΡΙΟΥ». An hour where the class has nothing scheduled is nothing to join,
+so it shows nothing rather than inventing a lesson; those hours are listed in the
+report.
+
+An `extra` tied to a `parent` is only offered while that parent is selected —
+the French half of Α2 is not a choice anyone outside Α2 has to make — and it is
+dropped from a saved selection the moment the student moves to another class.
 
 ---
 
@@ -311,10 +327,11 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
   which read as two different half-empty groups. Spaces never mean anything in a
   label here, so they are all dropped (as are Latin lookalike letters — `B5` and
   `Β5`).
-- **A split group replaces its class's hour instead of colliding with it.** See
-  *How the merge works* above; the rule lives in `groupRules` in
-  `tools/aliases.json` as `"parallel": true`, and every replacement it causes is
-  listed in the import report.
+- **A split group replaces its class's hour instead of colliding with it, and a
+  τμήμα ένταξης only adds a teacher to it.** See *How the merge works* above; both
+  rules live in `groupRules` in `tools/aliases.json`, as `"parallel": true` and
+  `"coteach": true`, and everything either one does is listed in the import
+  report.
 - **Double periods are drawn as one merged cell.** When a class has the same
   lesson two hours running, aSc leaves out the rule between the two columns and
   centres the text across both. Read naively that fills one hour and leaves the
@@ -353,7 +370,9 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
   class that simply may have no hour in a given week, so it is always offered.
   Hide one by name via `excludeGroups.labels` if it genuinely does not exist.
 - To suppress a group that *does* have lessons but should not be offered, add its
-  label to `excludeGroups.labels` in `tools/aliases.json`.
+  label to `excludeGroups.labels` in `tools/aliases.json`. `Γιστορια6` and
+  `Γμαθηματικα3` are there now: aSc still exports a page for each, but neither
+  runs as a class any more.
 - The converter reads the table geometry from the ruled lines aSc draws, not from
   fixed coordinates, so it tolerates layout shifts between exports. It will
   **fail loudly** rather than emit a half-parsed timetable.
