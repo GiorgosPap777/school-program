@@ -159,18 +159,24 @@ def main(path):
         # The school's noticeboard gives a home classroom to every section and
         # every orientation group, so those must have one the moment they have
         # an hour. A «κόντρα» elective with no hour this week has nowhere to be
-        # yet; and a split group (Γαλλικά) follows its teacher rather than
-        # owning a room — the PDF prints no room for those lessons either.
-        # Both are reported, not failed. A τμήμα ένταξης sits in the class's
-        # own room and is checked for having none of its own further down.
+        # yet; and a group split off a class (Γαλλικά, a τμήμα ένταξης) has no
+        # room of its own because it sits in the class's — the app resolves it
+        # through `parent`, so what must hold for those is that the parent has
+        # one. A lesson with no room at all is the bug this guards against.
         homed = ("section", "track")
         missing = sorted(n for n, g in groups.items()
                          if not g["hidden"] and g["lessons"]
                          and g["kind"] in homed and not g.get("room"))
         assert not missing, "no room for %s — add them to aliases.json groupRooms" \
             % ", ".join(missing)
+        for name, g in groups.items():
+            if g["hidden"] or g.get("room") or not g.get("parent"):
+                continue
+            assert groups[g["parent"]].get("room"), \
+                "%s has no room and neither does %s, the class it sits in" \
+                % (name, g["parent"])
         blank = sorted(n for n, g in groups.items()
-                       if not g["hidden"] and not g.get("room") and not g.get("coteach"))
+                       if not g["hidden"] and not g.get("room") and not g.get("parent"))
         if blank:
             print("    note: no room on the noticeboard yet for %s" % ", ".join(blank))
 

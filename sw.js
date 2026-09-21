@@ -3,7 +3,7 @@
    Bump APP_VERSION whenever you change any shell file — the cache name derives
    from it, so a new version installs cleanly and the old one is swept away. */
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 const SHELL_CACHE = `gel7-shell-${APP_VERSION}`;
 const DATA_CACHE = 'gel7-data';
 const DATA_TIMEOUT_MS = 3000;

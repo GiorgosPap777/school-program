@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -263,22 +263,30 @@ function buildGrid(schedule, selection) {
       const slot = (grid[lesson.d] || [])[lesson.p - 1];
       if (!slot || slot.group !== g.parent || slot.teacher === lesson.teacher) continue;
       slot.with = slot.with || [];
-      if (!slot.with.includes(lesson.teacher)) slot.with.push(lesson.teacher);
+      // Carry the group's own name — «Ενισχυτική Διδ.» — beside the teacher.
+      // A second name with nothing to explain it reads like a co-teacher of the
+      // same subject, which is not what the student is looking at.
+      if (!slot.with.some((w) => w.teacher === lesson.teacher)) {
+        slot.with.push({ teacher: lesson.teacher, note: g.name || '' });
+      }
     }
   }
   return { grid, conflicts };
 }
 
 /** Everyone in the room for a lesson: the class's own teacher first, then
-    whoever joins them for that hour. */
+    whoever joins them for that hour and what they are there for. */
 function teachers(lesson) {
-  return [lesson.teacher].concat(lesson.with || []).filter(Boolean);
+  return [lesson.teacher]
+    .concat((lesson.with || []).map((w) => w.note ? `${w.teacher} (${w.note})` : w.teacher))
+    .filter(Boolean);
 }
 
 /** The same names as HTML, the joining ones set smaller beside the first. */
 function teacherHtml(lesson) {
   return esc(lesson.teacher || '')
-    + (lesson.with || []).map((t) => `<small class="with">${esc(t)}</small>`).join('');
+    + (lesson.with || []).map((w) => `<small class="with">${esc(w.teacher)}`
+      + (w.note ? ` <em>(${esc(w.note)})</em>` : '') + '</small>').join('');
 }
 
 function selectedGroupIds(selection) {
@@ -644,7 +652,12 @@ function lessonRoom(lesson) {
   if (!lesson) return '';
   if (lesson.room) return roomName(lesson.room);
   const group = state.schedule.groups[lesson.group];
-  return (group && group.room) || '';
+  if (group && group.room) return group.room;
+  // A group split off a class has no home room of its own — the French half of
+  // Α2 and the τμήμα ένταξης teacher both work in Α2's room. Without this the
+  // hour loses its room entirely the moment such a group supplies the lesson.
+  const parent = group && group.parent && state.schedule.groups[group.parent];
+  return (parent && parent.room) || '';
 }
 
 function esc(value) {

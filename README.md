@@ -220,11 +220,14 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 similar). An `extra` may also carry `"parent": "Α2"` — the class it belongs to —
 and then one of two flags: `"parallel": true` says it splits that class for one
 subject, `"coteach": true` says it does not split anything and a second teacher
-joins that class for the hour.
+joins that class for the hour — and `name` is what the app calls that teacher
+beside the class's own («Ενισχυτική Διδ.»).
 `d` is a 0-based day index; `p` is a 1-based period number. `teacher` and `room`
 are omitted rather than written as `null` when there is nothing to say. A lesson's
 own `room` means it happens somewhere other than usual; otherwise the student is
-in the `room` of the group the lesson came from. `hidden` groups are kept in the
+in the `room` of the group the lesson came from — and a group split off a class
+has none of its own, so the app falls through to its `parent`'s. The French half
+of Α2 sits in Α2's room, because that is where it is. `hidden` groups are kept in the
 file but never offered in the picker — that flag is the converter's decision and
 the app does not second-guess it, which is what keeps an empty-but-real κόντρα
 elective on offer while an empty section stays hidden.
@@ -253,10 +256,11 @@ here would delete real lessons in silence.
 A **τμήμα ένταξης** (`"coteach": true`) is the opposite: nobody leaves, a second
 teacher simply walks into the same room for that hour. So Γ1εν is never offered in
 the picker at all — it rides along with Γ1 — and all it does is add a name beside
-the class's own teacher, set smaller: «ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗΣ + ΓΙΩΡΓΟΣ
-ΠΑΠΑΡΓΥΡΙΟΥ». An hour where the class has nothing scheduled is nothing to join,
-so it shows nothing rather than inventing a lesson; those hours are listed in the
-report.
+the class's own teacher, set smaller and labelled so it is clear what the second
+name is: «ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗΣ + ΓΙΩΡΓΟΣ ΠΑΠΑΡΓΥΡΙΟΥ (Ενισχυτική Διδ.)». The label
+is the group's `name` in `aliases.json`, not a string in the app. An hour where
+the class has nothing scheduled is nothing to join, so it shows nothing rather
+than inventing a lesson; those hours are listed in the report.
 
 An `extra` tied to a `parent` is only offered while that parent is selected —
 the French half of Α2 is not a choice anyone outside Α2 has to make — and it is
