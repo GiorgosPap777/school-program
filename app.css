@@ -21,8 +21,8 @@
   --shadow:      0 1px 2px rgba(16, 24, 40, .06), 0 8px 24px rgba(16, 24, 40, .06);
 
   --radius:      14px;
-  --gap:         12px;
-  --pad:         16px;
+  --gap:         10px;
+  --pad:         14px;
   --safe-top:    env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left:   env(safe-area-inset-left, 0px);
@@ -75,52 +75,54 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 /* ---------------------------------------------------------------- app bar */
 
 .app-bar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
   display: flex;
   align-items: center;
   gap: var(--gap);
-  padding: calc(var(--safe-top) + 12px) var(--pad) 12px;
+  padding: calc(var(--safe-top) + 8px) var(--pad) 8px;
   background: var(--accent);
   color: var(--accent-text);
 }
 .app-bar__text { flex: 1; min-width: 0; }
-.app-bar__title { font-size: 1.15rem; font-weight: 650; letter-spacing: -.01em; }
+.app-bar__title { font-size: 1.02rem; font-weight: 650; letter-spacing: -.01em; }
 .app-bar__sub {
-  font-size: .8rem; opacity: .82; margin-top: 1px;
+  font-size: .75rem; opacity: .82; margin-top: 1px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .app-bar__actions { display: flex; gap: 4px; }
 
 .icon-btn {
   display: grid; place-items: center;
-  width: 40px; height: 40px;
+  width: 38px; height: 38px;
   padding: 0; border: 0; border-radius: 10px;
   background: transparent; color: inherit; cursor: pointer;
 }
 .icon-btn:hover, .icon-btn:focus-visible { background: rgba(127, 127, 127, .22); }
 
+/* A phone that is not installed to the home screen gives another 100–150px to
+   the browser's own chrome, and a day with ενισχυτική runs the full seven
+   hours. Every pixel the frame does not take is a row the student does not
+   have to scroll for, so the frame is kept tight. The bar and the tabs stick
+   as one block: shrinking one no longer means retuning an offset on the other,
+   which is how the two used to drift apart. */
+.topbar { position: sticky; top: 0; z-index: 20; }
+
 /* ------------------------------------------------------------------ tabs */
 
 .tabs {
-  position: sticky;
-  top: calc(var(--safe-top) + 60px);
-  z-index: 19;
   display: flex;
   gap: 4px;
-  padding: 8px var(--pad);
+  padding: 5px var(--pad);
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 .tabs__btn {
   flex: 1;
-  padding: 9px 12px;
+  padding: 7px 12px;
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
   color: var(--muted);
-  font: inherit; font-size: .94rem; font-weight: 550;
+  font: inherit; font-size: .9rem; font-weight: 550;
   cursor: pointer;
 }
 .tabs__btn.is-active {
@@ -132,13 +134,13 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 
 /* ------------------------------------------------------------------ main */
 
-.main { padding: var(--pad) var(--pad) 8px; max-width: 720px; margin: 0 auto; }
+.main { padding: 12px var(--pad) 8px; max-width: 720px; margin: 0 auto; }
 .view { display: flex; flex-direction: column; gap: var(--gap); }
 
 /* ----------------------------------------------------------- status card */
 
 .status {
-  padding: 14px 16px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -146,11 +148,11 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 }
 .status--now { border-color: var(--now-edge); background: var(--now-bg); }
 .status__day { font-size: .8rem; color: var(--muted); text-transform: capitalize; }
-.status__headline { font-size: 1.24rem; font-weight: 650; margin-top: 2px; letter-spacing: -.01em; }
-.status__detail { font-size: .92rem; color: var(--muted); margin-top: 4px; }
+.status__headline { font-size: 1.14rem; font-weight: 650; margin-top: 1px; letter-spacing: -.01em; }
+.status__detail { font-size: .88rem; color: var(--muted); margin-top: 3px; }
 .status--now .status__detail { color: var(--now); font-weight: 550; }
 
-.bar { height: 5px; border-radius: 999px; background: var(--surface-2); margin-top: 12px; overflow: hidden; }
+.bar { height: 5px; border-radius: 999px; background: var(--surface-2); margin-top: 9px; overflow: hidden; }
 .bar__fill { height: 100%; border-radius: 999px; background: var(--now-edge); transition: width .4s ease; }
 
 /* ------------------------------------------------------------ period rows */
@@ -165,9 +167,9 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 
 .slot {
   display: grid;
-  grid-template-columns: 62px 1fr;
-  gap: 12px;
-  padding: 12px 14px;
+  grid-template-columns: 56px 1fr;
+  gap: 10px;
+  padding: 10px 13px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -178,7 +180,7 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
   border-color: var(--now-edge);
   border-width: 2px;
   background: var(--now-bg);
-  padding: 11px 13px;
+  padding: 9px 12px;
 }
 .slot--next { border-color: var(--accent); }
 
@@ -196,14 +198,13 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
    class's own teacher, smaller, never a lesson of its own. */
 .with { font-size: .85em; opacity: .75; }
 .with::before { content: " + "; }
-.with em { font-style: normal; opacity: .85; }
 
 /* A split group (Γαλλικά) takes the place of the class's own lesson. */
 .slot__instead { font-size: .8rem; color: var(--muted); margin-top: 4px; font-style: italic; }
 
 .tag {
   display: inline-block;
-  margin-top: 6px;
+  margin-top: 4px;
   padding: 2px 8px;
   border-radius: 999px;
   font-size: .72rem;

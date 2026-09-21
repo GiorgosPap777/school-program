@@ -137,8 +137,15 @@
     "ΓΙΑΝΝΗΣ ΔΗΜΑΚΗΣ ΥΠ/ ΝΤΗΣ": "ΓΙΑΝΝΗΣ ΔΗΜΑΚΗΣ (ΥΠ/ΝΤΗΣ)",
     "ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗ Σ": "ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗΣ"
   },
+  "kontraByTrack": {
+    "_comment": "Which «κόντρα» subject each Γ' orientation sits. The school decides this, not the student: Ανθρωπιστικών sit Μαθηματικά, everyone else sits Ιστορία. The picker then offers only the matching groups. Keys are the track display names used in groupRules; values are the `track` of the κόντρα groups. A track left out of this map is offered every κόντρα group, so removing the block restores the old behaviour.",
+    "Ανθρωπιστικών Σπουδών": "Μαθηματικά (Κόντρα)",
+    "Θετικών Σπουδών": "Ιστορία (Κόντρα)",
+    "Οικονομίας & Πληροφορικής": "Ιστορία (Κόντρα)",
+    "Υγείας & Ζωής (Βιολογία)": "Ιστορία (Κόντρα)"
+  },
   "groupRules": {
-    "_comment": "Ordered regex rules matched against the normalized group label. First match wins. Fields: grade, kind (section|track|kontra|extra), track (display name of the orientation), parent (capture group holding the class this group belongs to), name (what the picker calls it), parallel (true when the group splits the class for one subject, so its lesson replaces the class's lesson in that hour instead of colliding with it), coteach (true when nobody leaves the room and a second teacher simply joins the class for that hour — the group is never offered in the picker; its teacher is added to the class's own lesson, labelled with `name`).",
+    "_comment": "Ordered regex rules matched against the normalized group label. First match wins. Fields: grade, kind (section|track|kontra|extra), track (display name of the orientation), parent (capture group holding the class this group belongs to), name (what the picker calls it), parallel (true when the group splits the class for one subject, so its lesson replaces the class's lesson in that hour instead of colliding with it), coteach (true when nobody leaves the room and a second teacher simply joins the class for that hour — the group is never offered in the picker; its teacher is added to the class's own lesson, labelled with `name` — or with `shortName` in the week grid, where a cell has no room for the long one).",
     "rules": [
       {
         "re": "^Α[1-9][0-9]*$",
@@ -208,6 +215,7 @@
         "kind": "extra",
         "parent": 1,
         "name": "Ενισχυτική Διδ.",
+        "shortName": "Ενισχ.",
         "coteach": true
       },
       {

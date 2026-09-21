@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -251,23 +251,38 @@ function buildGrid(schedule, selection) {
     }
   }
 
-  // Nobody leaves the room for a τμήμα ένταξης: a second teacher simply walks
-  // in for that hour. So these are never picked — they ride along with the
-  // class — and all they do is add a name. An hour the class has free is nothing
-  // to join, and an hour another group took over is a room this student is not
-  // sitting in; both are skipped rather than invented.
+  // Nobody leaves the room for a τμήμα ένταξης: a second teacher walks in for
+  // the hour. So these are never picked — they ride along with the class — and
+  // mostly all they do is add a name. Three shapes, in the order they are
+  // tested: the class has no lesson at all and the hour goes ahead with the
+  // ενισχυτική teacher alone; the class has one with no teacher named and they
+  // cover it; or the ordinary case, two teachers in the room.
   for (const g of Object.values(schedule.groups)) {
     if (!g.coteach || !g.parent || !chosen.has(g.parent)) continue;
     for (const lesson of g.lessons) {
-      if (!lesson.teacher) continue;
-      const slot = (grid[lesson.d] || [])[lesson.p - 1];
-      if (!slot || slot.group !== g.parent || slot.teacher === lesson.teacher) continue;
-      slot.with = slot.with || [];
-      // Carry the group's own name — «Ενισχυτική Διδ.» — beside the teacher.
-      // A second name with nothing to explain it reads like a co-teacher of the
-      // same subject, which is not what the student is looking at.
-      if (!slot.with.some((w) => w.teacher === lesson.teacher)) {
-        slot.with.push({ teacher: lesson.teacher, note: g.name || '' });
+      const row = grid[lesson.d];
+      if (!lesson.teacher || !row || lesson.p < 1 || lesson.p > schedule.periods.length) continue;
+      const slot = row[lesson.p - 1];
+      if (!slot) {
+        // A real hour, just not one the class's own page shows. Dropping it
+        // would hide a lesson the student is expected to turn up to.
+        row[lesson.p - 1] = { ...lesson, group: g.label, alone: true,
+          teacherNote: g.name || '', teacherNoteShort: g.shortName || '' };
+      } else if (slot.group !== g.parent) {
+        continue;  // another group took this hour — a room this student is not in
+      } else if (!slot.teacher) {
+        slot.teacher = lesson.teacher;
+        slot.teacherNote = g.name || '';
+        slot.teacherNoteShort = g.shortName || '';
+      } else if (slot.teacher !== lesson.teacher) {
+        // Carry the group's own name — «Ενισχυτική Διδ.» — beside the teacher.
+        // A second name with nothing to explain it reads like a co-teacher of
+        // the same subject, which is not what the student is looking at.
+        slot.with = slot.with || [];
+        if (!slot.with.some((w) => w.teacher === lesson.teacher)) {
+          slot.with.push({ teacher: lesson.teacher, note: g.name || '',
+                           noteShort: g.shortName || '' });
+        }
       }
     }
   }
@@ -277,16 +292,33 @@ function buildGrid(schedule, selection) {
 /** Everyone in the room for a lesson: the class's own teacher first, then
     whoever joins them for that hour and what they are there for. */
 function teachers(lesson) {
-  return [lesson.teacher]
-    .concat((lesson.with || []).map((w) => w.note ? `${w.teacher} (${w.note})` : w.teacher))
+  const named = (name, note) => note ? `${name} (${note})` : name;
+  return [lesson.teacher && named(lesson.teacher, lesson.teacherNote)]
+    .concat((lesson.with || []).map((w) => named(w.teacher, w.note)))
     .filter(Boolean);
 }
 
-/** The same names as HTML, the joining ones set smaller beside the first. */
-function teacherHtml(lesson) {
-  return esc(lesson.teacher || '')
-    + (lesson.with || []).map((w) => `<small class="with">${esc(w.teacher)}`
-      + (w.note ? ` <em>(${esc(w.note)})</em>` : '') + '</small>').join('');
+/** The same names as HTML, the joining ones set smaller beside the first.
+    `compact` is for the week grid, where a full name and a full label wrap one
+    cell to four lines and push half the week off the screen. */
+function teacherHtml(lesson, compact) {
+  const who = (name) => esc(compact ? surname(name) : name);
+  const note = (full, short) => {
+    const text = compact ? (short || full) : full;
+    return text ? ` <em>(${esc(text)})</em>` : '';
+  };
+  return (lesson.teacher
+    ? who(lesson.teacher) + note(lesson.teacherNote, lesson.teacherNoteShort) : '')
+    + (lesson.with || []).map((w) =>
+      `<small class="with">${who(w.teacher)}${note(w.note, w.noteShort)}</small>`).join('');
+}
+
+/** Just the family name. Greek names here run given-name first and the titles
+    the school appends are parenthesised, so the last word left after dropping
+    those is the name students actually use. */
+function surname(name) {
+  const parts = String(name || '').replace(/\s*\(.*$/, '').trim().split(/\s+/);
+  return parts[parts.length - 1] || String(name || '');
 }
 
 function selectedGroupIds(selection) {
@@ -435,11 +467,12 @@ function renderStatusCard(date, status, rolled, listedDay) {
     const alsoNow = live.clash
       ? `<p class="conflict">⚠ Και ταυτόχρονα: ${esc(live.clash.map((c) => c.subject).join(', '))}</p>`
       : '';
-    const who = teachers(live).join(' + ');
+    // No teachers here on purpose. The very next row of the list repeats this
+    // lesson in full, and on a phone the names wrapped the card to three lines
+    // — 44px of duplication between the student and the rest of their day.
     card.innerHTML = dayLine
       + headline(live.subject)
       + detail(`${status.current + 1}η ώρα · λήγει ${durationText(bound.end - status.mins)}`
-        + (who ? ` · ${who}` : '')
         + (lessonRoom(live) ? ` · ${lessonRoom(live)}` : ''))
       + `<div class="bar"><div class="bar__fill" style="width:${pct.toFixed(1)}%"></div></div>`
       + alsoNow;
@@ -511,6 +544,14 @@ function renderDayList(target, dayIdx, status, withHeading) {
       .map((r) => `${r.subject} (${r.group})`);
     if (swapped.length) {
       instead = `<p class="slot__instead">αντί για ${esc(swapped.join(', '))}</p>`;
+    }
+
+    // The class's own page shows nothing this hour, but the ενισχυτική teacher
+    // has it — so it happens, with them. Say so, or the student is left
+    // wondering why a lesson appeared out of a group they never picked.
+    if (lesson && lesson.alone) {
+      instead += '<p class="slot__instead">η ώρα γίνεται με την ενισχυτική διδασκαλία'
+        + ` — το ${esc(state.schedule.groups[lesson.group].parent)} δεν έχει άλλο μάθημα</p>`;
     }
 
     const li = document.createElement('li');
@@ -605,7 +646,7 @@ function renderWeekGrid(status) {
       html += `<td${cls.length ? ` class="${cls.join(' ')}"` : ''}>`;
       if (lesson) {
         html += `<div class="grid__subject">${esc(shortSubject(lesson.subject))}</div>`;
-        const who = teacherHtml(lesson);
+        const who = teacherHtml(lesson, true);
         if (who) html += `<div class="grid__teacher">${who}</div>`;
         const where = lessonRoom(lesson);
         if (where) html += `<div class="grid__room">${esc(where)}</div>`;
@@ -700,9 +741,29 @@ function pickerModel(grade, chosen) {
     sections: all.filter((g) => g.kind === 'section' && g.grade === grade && offered(g))
       .sort((a, b) => a.label.localeCompare(b.label, 'el')),
     tracks: byTrack('track'),
-    kontra: byTrack('kontra'),
+    kontra: onlyKontra(byTrack('kontra'), chosen && chosen.track),
     extras: all.filter((g) => g.kind === 'extra' && offered(g) && g.grade === grade && mine(g)),
   };
+}
+
+/** The «κόντρα» subject an orientation sits, or null if the school has not said.
+    Ανθρωπιστικών sit Μαθηματικά, everyone else Ιστορία — that is the school's
+    rule, in `kontraByTrack`, not the student's choice and not a list in here. */
+function kontraSubject(trackId) {
+  const group = trackId && state.schedule.groups[trackId];
+  return (group && (state.schedule.kontraByTrack || {})[group.track]) || null;
+}
+
+/** Narrow the κόντρα groups to the subject that goes with the chosen track, so
+    a θετική student is not asked to choose between two Ιστορία groups and three
+    Μαθηματικά ones when only one subject was ever theirs. An unmapped track, or
+    a mapping that matches nothing here, leaves every group on offer rather than
+    none — being shown too much beats being shown nothing. */
+function onlyKontra(map, trackId) {
+  const wanted = kontraSubject(trackId);
+  if (!wanted || !map.has(wanted)) return map;
+  for (const key of [...map.keys()]) if (key !== wanted) map.delete(key);
+  return map;
 }
 
 function openPicker() {
@@ -716,9 +777,12 @@ function openPicker() {
 function renderPicker() {
   const draft = state.draft;
   const model = pickerModel(draft.grade, draft);
-  // Moving to another class takes that class's own groups with it.
+  // Moving to another class — or another orientation — takes with it whatever
+  // was only ever on offer because of it.
   const onOffer = new Set(model.extras.map((g) => g.label));
   draft.extras = (draft.extras || []).filter((id) => onOffer.has(id));
+  const kontraOnOffer = new Set([...model.kontra.values()].flat().map((g) => g.label));
+  if (draft.kontra && !kontraOnOffer.has(draft.kontra)) draft.kontra = null;
   const body = $('pickerBody');
   body.innerHTML = '';
 
@@ -764,7 +828,10 @@ function renderPicker() {
         onClick: () => { draft.kontra = draft.kontra === g.label ? null : g.label; renderPicker(); },
       })));
     }
-    body.appendChild(field('Μάθημα επιλογής («Κόντρα»)', 'Προαιρετικό.', chips));
+    body.appendChild(field('Μάθημα επιλογής («Κόντρα»)',
+      kontraSubject(draft.track)
+        ? 'Μόνο οι ομάδες που αντιστοιχούν στην κατεύθυνσή σου.'
+        : 'Προαιρετικό.', chips));
   }
 
   if (model.extras.length) {
@@ -824,6 +891,10 @@ function pruneSelection(selection, schedule) {
     kontra: alive(selection.kontra) ? selection.kontra : null,
     extras: [],
   };
+  // The κόντρα follows the orientation, so one saved against a track the
+  // student has since moved off is no longer theirs to keep.
+  const wanted = next.track && (schedule.kontraByTrack || {})[schedule.groups[next.track].track];
+  if (wanted && next.kontra && schedule.groups[next.kontra].track !== wanted) next.kontra = null;
   // Same rule as the picker, applied to what was saved earlier: an extra tied
   // to a class outlives neither a move to another class nor a version of the
   // app that stopped offering it.

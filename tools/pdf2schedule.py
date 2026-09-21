@@ -449,6 +449,7 @@ class Report:
         self.retimed = []
         self.parallel = []
         self.coteach = []
+        self.kontra_open = []
         self.validity = None
 
     def ok(self) -> bool:
@@ -485,6 +486,8 @@ class Report:
                 self.parallel)
         section("ΤΜΗΜΑΤΑ ΕΝΤΑΞΗΣ — ΔΕΥΤΕΡΟΣ ΚΑΘΗΓΗΤΗΣ ΣΤΗΝ ΙΔΙΑ ΩΡΑ",
                 self.coteach)
+        section("ΚΑΤΕΥΘΥΝΣΕΙΣ ΧΩΡΙΣ ΟΡΙΣΜΕΝΟ ΚΟΝΤΡΑ (τους προσφέρονται όλα)",
+                self.kontra_open)
         section("ΑΡΧΙΚΑ ΚΑΘΗΓΗΤΩΝ ΠΟΥ ΑΝΑΓΝΩΡΙΣΤΗΚΑΝ", self.resolved_initials)
         section("ΑΤΑΞΙΝΟΜΗΤΕΣ ΟΜΑΔΕΣ", self.unclassified_groups)
         section("ΟΜΑΔΕΣ ΧΩΡΙΣ ΑΙΘΟΥΣΑ (πρόσθεσέ τες στο groupRooms όταν τη μάθεις)",
@@ -678,7 +681,7 @@ def build(pdf_path: str, args) -> tuple:
             "hidden": hidden,
             "lessons": lessons,
         }
-        for key in ("track", "name", "parent", "parallel", "coteach"):
+        for key in ("track", "name", "shortName", "parent", "parallel", "coteach"):
             if info.get(key):
                 group[key] = info[key]
         room = norm.group_rooms.get(label)
@@ -757,7 +760,7 @@ def build(pdf_path: str, args) -> tuple:
                        lesson["teacher"] or "χωρίς καθηγητή",
                        "μαζί με %s (%s)" % (was["teacher"] or "—", was["subject"])
                        if was else
-                       "— το %s δεν έχει μάθημα αυτή την ώρα, δεν εμφανίζεται"
+                       "— μόνος του, το %s δεν έχει μάθημα αυτή την ώρα"
                        % parent["label"]))
             else:
                 report.parallel.append(
@@ -765,6 +768,25 @@ def build(pdf_path: str, args) -> tuple:
                     % (g["label"], DAY_NAMES[lesson["d"]], lesson["p"],
                        lesson["subject"],
                        was["subject"] if was else "κενό — πρόσθετη ώρα"))
+
+    # Which «κόντρα» goes with which orientation. Checked against the groups
+    # that actually came out of this PDF: a typo here would quietly leave a
+    # whole orientation with nothing to pick, which looks like missing data
+    # rather than a wrong table.
+    kontra_by_track = {k: v for k, v in aliases.get("kontraByTrack", {}).items()
+                       if not k.startswith("_")}
+    track_names = {g.get("track") for g in live if g["kind"] == "track"}
+    kontra_names = {g.get("track") for g in live if g["kind"] == "kontra"}
+    for track, wants in sorted(kontra_by_track.items()):
+        if track not in track_names:
+            report.warnings.append(
+                "το kontraByTrack δείχνει κατεύθυνση «%s» που δεν υπάρχει" % track)
+        elif wants not in kontra_names:
+            report.warnings.append(
+                "η κατεύθυνση «%s» ζητά κόντρα «%s», που δεν έχει καμία ομάδα"
+                % (track, wants))
+    for track in sorted(n for n in track_names if n and n not in kontra_by_track):
+        report.kontra_open.append(track)
 
     short = {k: v for k, v in aliases["subjectShort"].items() if not k.startswith("_")}
     used_subjects = {l["subject"] for g in groups.values() for l in g["lessons"]}
@@ -784,6 +806,7 @@ def build(pdf_path: str, args) -> tuple:
         "periods": periods,
         "rooms": {k: v for k, v in rooms.items() if k in used_rooms},
         "subjectShort": {k: v for k, v in short.items() if k in used_subjects},
+        "kontraByTrack": kontra_by_track,
         "groups": dict(sorted(groups.items())),
     }
     return schedule, report

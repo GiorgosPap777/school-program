@@ -130,8 +130,9 @@ so without a bump the old files stay cached on every installed phone.
 3. **Read `data/report.txt`.** It lists unknown subjects, unclassified groups,
    merged double periods, teacher initials it resolved, hours it corrected
    against the school's ωράριο, groups that replace their class's hour, τμήματα
-   ένταξης and whose lesson each one joins, groups with no classroom, the
-   validity banner it read, and any timetable collisions.
+   ένταξης and whose lesson each one joins, orientations with no «κόντρα» pinned
+   to them, groups with no classroom, the validity banner it read, and any
+   timetable collisions.
    A clean report means the import is trustworthy; if something is listed, add
    it to `tools/aliases.json` and re-run.
 4. Check the invariants still hold:
@@ -234,6 +235,9 @@ elective on offer while an empty section stays hidden.
 
 The picker is built entirely by grouping over `groups` — no class list is
 hardcoded anywhere — so a new section or orientation next term appears on its own.
+`kontraByTrack` pairs each Γ' orientation with the «κόντρα» subject it sits, so
+the picker offers a θετική student the Ιστορία groups and nothing else. Leave an
+orientation out of that table and it is offered all of them.
 
 ### How the merge works
 
@@ -258,13 +262,19 @@ teacher simply walks into the same room for that hour. So Γ1εν is never offer
 the picker at all — it rides along with Γ1 — and all it does is add a name beside
 the class's own teacher, set smaller and labelled so it is clear what the second
 name is: «ΣΠΥΡΟΣ ΚΑΤΣΑΡΑΠΙΔΗΣ + ΓΙΩΡΓΟΣ ΠΑΠΑΡΓΥΡΙΟΥ (Ενισχυτική Διδ.)». The label
-is the group's `name` in `aliases.json`, not a string in the app. An hour where
-the class has nothing scheduled is nothing to join, so it shows nothing rather
-than inventing a lesson; those hours are listed in the report.
+is the group's `name` in `aliases.json` (and `shortName` in the week grid, where
+a cell has no room for the long one), not a string in the app.
+
+Where the class has **no** lesson that hour, the hour still runs — with the
+ενισχυτική teacher on their own. Α2 has four of those. They appear as ordinary
+lessons in the class's own room, under a line saying why they are there, because
+a lesson the student is expected to turn up to is not something to drop for
+tidiness. The report lists every one.
 
 An `extra` tied to a `parent` is only offered while that parent is selected —
 the French half of Α2 is not a choice anyone outside Α2 has to make — and it is
-dropped from a saved selection the moment the student moves to another class.
+dropped from a saved selection the moment the student moves to another class. The
+κόντρα behaves the same way against the orientation.
 
 ---
 
@@ -331,6 +341,16 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
   which read as two different half-empty groups. Spaces never mean anything in a
   label here, so they are all dropped (as are Latin lookalike letters — `B5` and
   `Β5`).
+- **Which «κόντρα» a Γ' student sits is not their choice.** Ανθρωπιστικών sit
+  Μαθηματικά; Θετικών, Οικονομίας and Υγείας sit Ιστορία. The pairing is
+  `kontraByTrack` in `tools/aliases.json`, and the import fails if it points an
+  orientation at a subject with no groups, or leaves a group no orientation can
+  reach.
+- **The week grid shows family names only.** A full «ΙΩΑΝΝΑ ΧΡΙΣΤΙΝΑΚΗ
+  (ΥΠ/ΝΤΡΙΑ)» wraps a grid cell to four lines and pushes half the week off a
+  phone screen. Greek names run given-name first, so the last word left after
+  dropping a parenthesised title is the name students use anyway. The day list
+  keeps the full name.
 - **A split group replaces its class's hour instead of colliding with it, and a
   τμήμα ένταξης only adds a teacher to it.** See *How the merge works* above; both
   rules live in `groupRules` in `tools/aliases.json`, as `"parallel": true` and

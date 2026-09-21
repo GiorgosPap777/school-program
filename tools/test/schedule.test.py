@@ -205,24 +205,52 @@ def main(path):
             print("    note: groups that replace their class's hour: %s"
                   % ", ".join(live))
 
-    @check("a τμήμα ένταξης only ever adds a teacher to an hour the class has")
+    @check("a τμήμα ένταξης is named and roomed through its class")
     def _():
-        # The app merges a coteach group's teacher into the class's own lesson
-        # and shows nothing at all for an hour the class has free. That is the
-        # right call — it must not invent a lesson — but it does mean those
-        # hours vanish, so count them here rather than letting them go unseen.
-        stray = []
+        # The app merges a coteach group's teacher into the class's own lesson,
+        # and where the class has no lesson at all the hour still runs — with
+        # the ενισχυτική teacher alone. Either way the name needs a label the
+        # student can read, or a second name appears with nothing to explain it.
+        alone = []
         for name, g in groups.items():
             if not g.get("coteach"):
                 continue
             assert not g.get("room"), \
                 "%s has a room of its own, but it sits in the class's room" % name
+            assert g.get("name"), "%s joins a lesson under no name" % name
             held = {(l["d"], l["p"]) for l in groups[g["parent"]]["lessons"]}
-            stray += ["%s %s.%d" % (name, data["days"][l["d"]], l["p"]) for l in g["lessons"]
-                      if (l["d"], l["p"]) not in held]
-        if stray:
-            print("    note: ένταξη hours with no lesson in the class to join: %s"
-                  % ", ".join(stray))
+            alone += ["%s %s.%d" % (name, data["days"][l["d"]], l["p"])
+                      for l in g["lessons"] if (l["d"], l["p"]) not in held]
+        if alone:
+            print("    note: hours that run with the ενισχυτική teacher alone: %s"
+                  % ", ".join(alone))
+
+    @check("every orientation has exactly one «κόντρα» subject to pick from")
+    def _():
+        # The school pairs the two: Ανθρωπιστικών sit Μαθηματικά, everyone else
+        # Ιστορία, and the picker shows only the matching groups. A track left
+        # out of the map is offered everything — tolerable — but a map that
+        # points at a subject with no groups leaves a whole orientation with an
+        # empty list, and a κόντρα subject no track asks for is a group nobody
+        # can reach. Neither looks like a broken table from the app; they look
+        # like missing data.
+        pairs = data.get("kontraByTrack", {})
+        offered = {g["track"] for g in kontra.values() if not g["hidden"]}
+        if not offered:
+            return
+        for track, wants in pairs.items():
+            assert wants in offered, \
+                "«%s» sit «%s», which has no group on offer" % (track, wants)
+        picked = {v for k, v in pairs.items()
+                  if any(g["track"] == k and g["grade"] == "Γ" for g in tracks.values())}
+        assert offered <= picked, \
+            "no orientation sits %s — nobody can reach those groups" \
+            % ", ".join(sorted(offered - picked))
+        loose = sorted(g["track"] for g in tracks.values()
+                       if g["grade"] == "Γ" and not g["hidden"] and g["track"] not in pairs)
+        if loose:
+            print("    note: orientations offered every κόντρα group: %s"
+                  % ", ".join(sorted(set(loose))))
 
     @check("every group is classified and grade-tagged")
     def _():
