@@ -276,6 +276,24 @@ def main(path):
         missing = used - set(data.get("rooms", {}))
         assert not missing, "no description for %s" % ", ".join(sorted(missing))
 
+    @check("a lesson held outside the classroom names no room at all")
+    def _():
+        # Γυμναστική is in the προαύλιο. The danger is not a wrong room in the
+        # file — there is none — but the app's fallback to the class's home
+        # room, which would send the student indoors. The list has to reach the
+        # app for that fallback to stand down, so check it travelled.
+        outside = data.get("roomlessSubjects")
+        assert outside is not None, \
+            "roomlessSubjects never reached the file — the app cannot skip the room"
+        taught = {l["subject"] for g in groups.values() for l in g["lessons"]}
+        for name in outside:
+            assert name in taught, "«%s» is not taught anywhere" % name
+        for g in groups.values():
+            for l in g["lessons"]:
+                assert not (l["subject"] in outside and l.get("room")), \
+                    "%s on %s ώρα %d names room %s, but it is not held in one" \
+                    % (l["subject"], data["days"][l["d"]], l["p"], l.get("room"))
+
     @check("the tracks a student can pick actually cover the section's gaps")
     def _():
         # A Β'/Γ' section leaves periods free for its orientation track. If a

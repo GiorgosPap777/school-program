@@ -131,8 +131,8 @@ so without a bump the old files stay cached on every installed phone.
    merged double periods, teacher initials it resolved, hours it corrected
    against the school's ωράριο, groups that replace their class's hour, τμήματα
    ένταξης and whose lesson each one joins, orientations with no «κόντρα» pinned
-   to them, groups with no classroom, the validity banner it read, and any
-   timetable collisions.
+   to them, subjects held outside any classroom, groups with no classroom, the
+   validity banner it read, and any timetable collisions.
    A clean report means the import is trustworthy; if something is listed, add
    it to `tools/aliases.json` and re-run.
 4. Check the invariants still hold:
@@ -228,7 +228,9 @@ are omitted rather than written as `null` when there is nothing to say. A lesson
 own `room` means it happens somewhere other than usual; otherwise the student is
 in the `room` of the group the lesson came from — and a group split off a class
 has none of its own, so the app falls through to its `parent`'s. The French half
-of Α2 sits in Α2's room, because that is where it is. `hidden` groups are kept in the
+of Α2 sits in Α2's room, because that is where it is. `roomlessSubjects` overrides
+all of that: a subject on that list is held nowhere the timetable can name, so no
+room is shown for it at all. `hidden` groups are kept in the
 file but never offered in the picker — that flag is the converter's decision and
 the app does not second-guess it, which is what keeps an empty-but-real κόντρα
 elective on offer while an empty section stays hidden.
@@ -381,6 +383,12 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
   its own when it is somewhere else (a lab), and that wins. This matters most for
   Γ΄, who move between their general room and their orientation room during the
   day. A group that can be picked but has no room is flagged by the tests.
+- **Some lessons are not in a room at all.** Γυμναστική is out in the προαύλιο, so
+  showing the class's home room there would send the student to the wrong place.
+  Subjects on `roomlessSubjects.subjects` in `tools/aliases.json` are shown with no
+  room: the import strips any the PDF prints (and says so in the report, since it
+  may mean the lesson has moved indoors), and the list travels in `schedule.json`
+  so the app also skips the fall-through to the group's own room.
 - **Rooms the school does not use are dropped.** `ΕΦΕ` is printed on 14 lessons
   in the PDF but that lab is not actually used, so it is stripped at import via
   `hideRooms.labels` in `tools/aliases.json`; the lessons keep their subject and

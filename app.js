@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -691,6 +691,11 @@ function roomName(code) {
     orientation hours, so it is worth showing on every row. */
 function lessonRoom(lesson) {
   if (!lesson) return '';
+  // Some lessons have nowhere to name: Γυμναστική is out in the προαύλιο. The
+  // class's own room is exactly the wrong answer there, so say nothing rather
+  // than send the student indoors. Which subjects those are is the school's to
+  // say — `roomlessSubjects`, out of aliases.json.
+  if ((state.schedule.roomlessSubjects || []).includes(lesson.subject)) return '';
   if (lesson.room) return roomName(lesson.room);
   const group = state.schedule.groups[lesson.group];
   if (group && group.room) return group.room;

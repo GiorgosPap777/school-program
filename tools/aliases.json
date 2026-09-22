@@ -120,13 +120,19 @@
     "Γμαθηματικα1": "Αίθ. 16",
     "Γμαθηματικα2": "Αίθ. 15",
     "Γιστορια3": "Αίθ. 14",
-    "Γιστορια4": "Αίθ. 12",
-    "Γιστορια5": "Αίθ. 11"
+    "Γιστορια4": "Αίθ. 11",
+    "Γιστορια5": "Αίθ. 12"
   },
   "hideRooms": {
     "_comment": "Room codes the PDF prints but the school does not actually use. Lessons keep their subject and teacher; the room is simply not shown. Remove a code from `labels` to start showing it again.",
     "labels": [
       "ΕΦΕ"
+    ]
+  },
+  "roomlessSubjects": {
+    "_comment": "Subjects that never happen in a classroom. The class still has the hour — it is simply somewhere the timetable cannot name (Γυμναστική is in the προαύλιο, or the γυμναστήριο when it rains), so printing the group\u2019s home room there would send the student to the wrong place. No room is shown for these, not even one the PDF prints itself.",
+    "subjects": [
+      "Γυμναστική"
     ]
   },
   "teachers": {

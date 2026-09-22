@@ -372,6 +372,7 @@ class Normaliser:
                       if not k.startswith("_")}
         self.rooms = {k: v for k, v in aliases["rooms"].items() if not k.startswith("_")}
         self.hidden_rooms = set(aliases.get("hideRooms", {}).get("labels", []))
+        self.roomless = set(aliases.get("roomlessSubjects", {}).get("subjects", []))
         self.teachers = {collapse(k): v for k, v in aliases["teachers"].items()
                          if not k.startswith("_")}
         self.rules = aliases["groupRules"]["rules"]
@@ -446,6 +447,7 @@ class Report:
         self.resolved_initials = set()
         self.empty_kontra = []
         self.roomless_groups = set()
+        self.roomless_subjects = []
         self.retimed = []
         self.parallel = []
         self.coteach = []
@@ -477,6 +479,8 @@ class Report:
         section("ΑΓΝΩΣΤΑ ΜΑΘΗΜΑΤΑ (πρόσθεσέ τα στο tools/aliases.json)",
                 self.unknown_subjects)
         section("ΑΓΝΩΣΤΟΙ ΚΩΔΙΚΟΙ ΑΙΘΟΥΣΑΣ", self.unknown_rooms)
+        section("ΜΑΘΗΜΑΤΑ ΧΩΡΙΣ ΑΙΘΟΥΣΑ — ΕΚΤΟΣ ΤΑΞΗΣ (roomlessSubjects)",
+                self.roomless_subjects)
         section("ΑΙΘΟΥΣΕΣ ΠΟΥ ΑΓΝΟΗΘΗΚΑΝ (hideRooms)",
                 ["%s — σε %d μαθήματα" % (k, v)
                  for k, v in sorted(self.dropped_rooms.items())])
@@ -585,6 +589,15 @@ def parse_page(items: list, content: str, norm: Normaliser, report: Report):
                 room = norm.room(cell["code"])
         elif cell["code"]:
             room = norm.room(cell["code"])
+        if room and cell["subject"] in norm.roomless:
+            # Γυμναστική is in the προαύλιο. A room printed on such a cell is a
+            # place the class is not, so it never reaches the file — but it is
+            # worth a look, since it may mean the lesson has moved indoors.
+            report.warnings.append(
+                "«%s» %s ώρα %d: το %s δείχνει αίθουσα «%s» — δεν γράφτηκε "
+                "(roomlessSubjects)" % (label, DAY_NAMES[cell["d"]],
+                                        cell["span"][0] + 1, cell["subject"], room))
+            room = None
 
         first, last = cell["span"]
         if last > first:
@@ -790,6 +803,18 @@ def build(pdf_path: str, args) -> tuple:
 
     short = {k: v for k, v in aliases["subjectShort"].items() if not k.startswith("_")}
     used_subjects = {l["subject"] for g in groups.values() for l in g["lessons"]}
+
+    # Subjects with nowhere to name. The app needs the list too: dropping the
+    # room here is not enough, because it would otherwise fall back to the
+    # class's home room and send the student indoors.
+    roomless = [s for s in aliases.get("roomlessSubjects", {}).get("subjects", [])
+                if not s.startswith("_")]
+    for name in roomless:
+        if name not in used_subjects:
+            report.warnings.append(
+                "το roomlessSubjects έχει μάθημα «%s» που δεν διδάσκεται πουθενά"
+                % name)
+    report.roomless_subjects = [s for s in roomless if s in used_subjects]
     rooms = {k: v for k, v in aliases["rooms"].items() if not k.startswith("_")}
     used_rooms = {l["room"] for g in groups.values() for l in g["lessons"] if l.get("room")}
 
@@ -807,6 +832,7 @@ def build(pdf_path: str, args) -> tuple:
         "rooms": {k: v for k, v in rooms.items() if k in used_rooms},
         "subjectShort": {k: v for k, v in short.items() if k in used_subjects},
         "kontraByTrack": kontra_by_track,
+        "roomlessSubjects": report.roomless_subjects,
         "groups": dict(sorted(groups.items())),
     }
     return schedule, report
