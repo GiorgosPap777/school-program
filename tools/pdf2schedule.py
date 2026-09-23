@@ -494,7 +494,7 @@ class Report:
                 self.kontra_open)
         section("ΑΡΧΙΚΑ ΚΑΘΗΓΗΤΩΝ ΠΟΥ ΑΝΑΓΝΩΡΙΣΤΗΚΑΝ", self.resolved_initials)
         section("ΑΤΑΞΙΝΟΜΗΤΕΣ ΟΜΑΔΕΣ", self.unclassified_groups)
-        section("ΟΜΑΔΕΣ ΧΩΡΙΣ ΑΙΘΟΥΣΑ (πρόσθεσέ τες στο groupRooms όταν τη μάθεις)",
+        section("ΟΜΑΔΕΣ ΧΩΡΙΣ ΔΙΚΗ ΤΟΥΣ ΑΙΘΟΥΣΑ (πρόσθεσέ τες στο groupRooms όταν τη μάθεις)",
                 self.roomless_groups)
         section("ΚΟΝΤΡΑ ΧΩΡΙΣ ΩΡΑ ΑΥΤΗ ΤΗΝ ΕΒΔΟΜΑΔΑ (εμφανίζονται κανονικά)",
                 self.empty_kontra)
@@ -701,7 +701,14 @@ def build(pdf_path: str, args) -> tuple:
         if room:
             group["room"] = room
         elif not hidden:
-            report.roomless_groups.add(label)
+            # A τμήμα ένταξης needs no room of its own: nobody moves, so the app
+            # reads the class's. A split group does move, and until the school
+            # says where, its hours show no room at all — worth saying which
+            # kind this is, because only one of them leaves a blank on screen.
+            report.roomless_groups.add(
+                "%s — %s" % (label, "παίρνει την αίθουσα του %s" % info["parent"]
+                             if info.get("coteach") else
+                             "οι ώρες της εμφανίζονται χωρίς αίθουσα"))
         groups[label] = group
 
     if not groups:

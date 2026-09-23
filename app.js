@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -699,10 +699,13 @@ function lessonRoom(lesson) {
   if (lesson.room) return roomName(lesson.room);
   const group = state.schedule.groups[lesson.group];
   if (group && group.room) return group.room;
-  // A group split off a class has no home room of its own — the French half of
-  // Α2 and the τμήμα ένταξης teacher both work in Α2's room. Without this the
-  // hour loses its room entirely the moment such a group supplies the lesson.
-  const parent = group && group.parent && state.schedule.groups[group.parent];
+  // A τμήμα ένταξης has no room of its own because nobody moves: the second
+  // teacher walks into the class's room, so that is the answer. A split group
+  // is the opposite — the French half of Α2 walks out, and the class's room is
+  // where the *other* half stayed. Name it only once the school says where they
+  // went (groupRooms), and say nothing until then.
+  const parent = group && !group.parallel && group.parent
+    && state.schedule.groups[group.parent];
   return (parent && parent.room) || '';
 }
 

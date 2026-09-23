@@ -159,10 +159,10 @@ def main(path):
         # The school's noticeboard gives a home classroom to every section and
         # every orientation group, so those must have one the moment they have
         # an hour. A «κόντρα» elective with no hour this week has nowhere to be
-        # yet; and a group split off a class (Γαλλικά, a τμήμα ένταξης) has no
-        # room of its own because it sits in the class's — the app resolves it
-        # through `parent`, so what must hold for those is that the parent has
-        # one. A lesson with no room at all is the bug this guards against.
+        # yet; and a τμήμα ένταξης has none of its own because nobody moves —
+        # the app reads it off the class, so what must hold there is that the
+        # class has one. A lesson with no room at all is the bug this guards
+        # against.
         homed = ("section", "track")
         missing = sorted(n for n, g in groups.items()
                          if not g["hidden"] and g["lessons"]
@@ -170,13 +170,17 @@ def main(path):
         assert not missing, "no room for %s — add them to aliases.json groupRooms" \
             % ", ".join(missing)
         for name, g in groups.items():
-            if g["hidden"] or g.get("room") or not g.get("parent"):
+            if g["hidden"] or g.get("room") or not g.get("coteach"):
                 continue
             assert groups[g["parent"]].get("room"), \
                 "%s has no room and neither does %s, the class it sits in" \
                 % (name, g["parent"])
+        # A split group walks out of the class, so the class's room is not an
+        # answer for it — those hours show none until the school says where
+        # they go. Worth printing: it is a blank on someone's screen.
         blank = sorted(n for n, g in groups.items()
-                       if not g["hidden"] and not g.get("room") and not g.get("parent"))
+                       if not g["hidden"] and not g.get("room")
+                       and not g.get("coteach"))
         if blank:
             print("    note: no room on the noticeboard yet for %s" % ", ".join(blank))
 

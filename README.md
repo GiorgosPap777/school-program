@@ -226,11 +226,13 @@ beside the class's own («Ενισχυτική Διδ.»).
 `d` is a 0-based day index; `p` is a 1-based period number. `teacher` and `room`
 are omitted rather than written as `null` when there is nothing to say. A lesson's
 own `room` means it happens somewhere other than usual; otherwise the student is
-in the `room` of the group the lesson came from — and a group split off a class
-has none of its own, so the app falls through to its `parent`'s. The French half
-of Α2 sits in Α2's room, because that is where it is. `roomlessSubjects` overrides
-all of that: a subject on that list is held nowhere the timetable can name, so no
-room is shown for it at all. `hidden` groups are kept in the
+in the `room` of the group the lesson came from — and a τμήμα ένταξης has none of
+its own, so the app falls through to its `parent`'s: nobody moves, the second
+teacher walks into the class's room. A split group is the other way round. The
+French half of Α2 walks out, and Α2's room is where the half doing German stayed,
+so nothing is shown until `groupRooms` says where the French group goes.
+`roomlessSubjects` overrides all of that: a subject on that list is held nowhere
+the timetable can name, so no room is shown for it at all. `hidden` groups are kept in the
 file but never offered in the picker — that flag is the converter's decision and
 the app does not second-guess it, which is what keeps an empty-but-real κόντρα
 elective on offer while an empty section stays hidden.
@@ -382,7 +384,10 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
   `tools/aliases.json` — one home room per group. A lesson only carries a room of
   its own when it is somewhere else (a lab), and that wins. This matters most for
   Γ΄, who move between their general room and their orientation room during the
-  day. A group that can be picked but has no room is flagged by the tests.
+  day. A group that can be picked but has no room is flagged by the tests and by
+  the import report, which says which kind it is — a τμήμα ένταξης reads the
+  class's room, while a split group's hours show none at all (Α2's Γαλλικά today:
+  the school has not said where they go).
 - **Some lessons are not in a room at all.** Γυμναστική is out in the προαύλιο, so
   showing the class's home room there would send the student to the wrong place.
   Subjects on `roomlessSubjects.subjects` in `tools/aliases.json` are shown with no
