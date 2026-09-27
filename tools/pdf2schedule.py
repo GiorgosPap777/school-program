@@ -515,8 +515,15 @@ class Report:
 # Page -> group
 # --------------------------------------------------------------------------
 
-def parse_page(items: list, content: str, norm: Normaliser, report: Report):
-    """Return (label, lessons, periods) for one timetable page."""
+def parse_page(items: list, content: str, norm: Normaliser, report: Report,
+               deferred: list):
+    """Return (label, lessons, periods) for one timetable page.
+
+    A short code that is neither a room nor anyone on this page is appended to
+    `deferred` instead of being decided here: it may be a teacher whose other
+    hours are all on other pages, and that is only knowable once every page has
+    been read.
+    """
     rows, cols, header = cell_bounds(content)
     if len(rows) != N_DAYS:
         report.warnings.append("σελίδα με %d ημέρες αντί για %d" % (len(rows), N_DAYS))
@@ -576,17 +583,14 @@ def parse_page(items: list, content: str, norm: Normaliser, report: Report):
     lessons = []
     for cell in cooked:
         room = None
+        pending = None
         if cell["code"] and not cell["teacher"] and not norm.is_room(cell["code"]):
             who = resolve_initials(cell["code"], cell["subject"], cooked)
             if who:
                 cell["teacher"] = who
                 report.resolved_initials.add("%s = %s" % (cell["code"], who))
             else:
-                report.warnings.append(
-                    "«%s» %s ώρα %d: ο κωδικός «%s» δεν είναι ούτε αίθουσα "
-                    "ούτε αρχικά καθηγητή" % (label, DAY_NAMES[cell["d"]],
-                                              cell["span"][0] + 1, cell["code"]))
-                room = norm.room(cell["code"])
+                pending = cell["code"]
         elif cell["code"]:
             room = norm.room(cell["code"])
         if room and cell["subject"] in norm.roomless:
@@ -616,6 +620,12 @@ def parse_page(items: list, content: str, norm: Normaliser, report: Report):
             if room:
                 lesson["room"] = room
             lessons.append(lesson)
+        if pending:
+            deferred.append({
+                "code": pending, "label": label, "d": cell["d"],
+                "p": cell["span"][0] + 1,
+                "lessons": lessons[-(cell["span"][1] - cell["span"][0] + 1):],
+            })
     lessons.sort(key=lambda l: (l["d"], l["p"]))
     return label, lessons, periods
 
@@ -636,6 +646,7 @@ def build(pdf_path: str, args) -> tuple:
 
     groups = {}
     periods = None
+    deferred = []
     footer_date = None
     valid_from = valid_to = None
 
@@ -660,7 +671,8 @@ def build(pdf_path: str, args) -> tuple:
                         valid_to = iso_date(m.group(4), m.group(5), m.group(6))
                     report.validity = collapse(it["text"])
                     break
-        label, lessons, page_periods = parse_page(items, content, norm, report)
+        label, lessons, page_periods = parse_page(items, content, norm, report,
+                                                  deferred)
         if label is None:
             continue
         if periods is None:
@@ -715,6 +727,34 @@ def build(pdf_path: str, args) -> tuple:
         raise ConversionError("no timetable pages recognised — is this an aSc export?")
     if periods is None:
         raise ConversionError("could not read the period header row")
+
+    # Inside a merged cell aSc writes the teacher as initials, which have the
+    # same shape as a room code. Most are settled on their own page; a teacher
+    # whose every other hour is on a different page is not, so the second look
+    # is at the whole school. Initials are an answer only when they point at
+    # exactly one teacher — otherwise the code is reported and left as written,
+    # which is how a genuinely new room code surfaces instead of being read as
+    # somebody's name.
+    everyone = sorted({l["teacher"] for g in groups.values()
+                       for l in g["lessons"] if l.get("teacher")})
+    for item in deferred:
+        hits = [t for t in everyone if item["code"] in initials_of(t)]
+        if len(hits) == 1:
+            for lesson in item["lessons"]:
+                lesson["teacher"] = hits[0]
+            report.resolved_initials.add("%s = %s (από άλλη σελίδα)"
+                                         % (item["code"], hits[0]))
+            continue
+        report.warnings.append(
+            "«%s» %s ώρα %d: ο κωδικός «%s» δεν είναι ούτε αίθουσα ούτε αρχικά "
+            "καθηγητή%s" % (item["label"], DAY_NAMES[item["d"]], item["p"],
+                            item["code"],
+                            " — ταιριάζει σε %d καθηγητές" % len(hits)
+                            if hits else ""))
+        room = norm.room(item["code"])
+        if room:
+            for lesson in item["lessons"]:
+                lesson["room"] = room
 
     # The times in the aSc header are the ones whoever built the timetable typed
     # in, and this school's bell does not follow them. The official ωράριο wins,
@@ -774,14 +814,25 @@ def build(pdf_path: str, args) -> tuple:
         for lesson in g["lessons"]:
             was = taken.get((lesson["d"], lesson["p"]))
             if g.get("coteach"):
+                if not was:
+                    joined = ("— μόνος του, το %s δεν έχει μάθημα αυτή την ώρα"
+                              % parent["label"])
+                elif was["subject"] != lesson["subject"]:
+                    # The two pages disagree about what the hour is. The class
+                    # is the room the student is in, so its own page wins and
+                    # that is what the app shows — but the disagreement is
+                    # worth reading, because it can just as easily mean the
+                    # class's lesson moved and the other sheet was not redone.
+                    joined = ("μαζί με %s (%s· η δική της σελίδα λέει %s)"
+                              % (was["teacher"] or "—", was["subject"],
+                                 lesson["subject"]))
+                else:
+                    joined = "μαζί με %s (%s)" % (was["teacher"] or "—",
+                                                  was["subject"])
                 report.coteach.append(
                     "%s %s ώρα %d: %s %s"
                     % (g["label"], DAY_NAMES[lesson["d"]], lesson["p"],
-                       lesson["teacher"] or "χωρίς καθηγητή",
-                       "μαζί με %s (%s)" % (was["teacher"] or "—", was["subject"])
-                       if was else
-                       "— μόνος του, το %s δεν έχει μάθημα αυτή την ώρα"
-                       % parent["label"]))
+                       lesson["teacher"] or "χωρίς καθηγητή", joined))
             else:
                 report.parallel.append(
                     "%s %s ώρα %d: %s αντί για %s"

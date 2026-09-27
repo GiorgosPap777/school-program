@@ -5,8 +5,8 @@ and **elective groups** into one timetable, and highlights the period that is
 running right now. Works offline once loaded, installs to the home screen on both
 iOS and Android, and picks up new schedule revisions without an app rewrite.
 
-The school publishes its timetable as a 49-page aSc Timetables PDF where a single
-student's week is spread across three separate pages. This app does that merge for
+The school publishes its timetable as an aSc Timetables PDF — 56 pages this
+revision — where a single student's week is spread across three separate pages. This app does that merge for
 them.
 
 ---
@@ -147,7 +147,7 @@ so without a bump the old files stay cached on every installed phone.
 
 No flags are normally needed: `--version` defaults to the creation date in the
 PDF footer, and `--valid-from` / `--valid-to` to the «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ
-21-9-26» banner aSc prints under every grid. Pass them only to override what the
+28-9-26» banner aSc prints under every grid. Pass them only to override what the
 PDF says. A revision with no end date in the banner simply has no `validTo`, and
 the app's footer reads «ισχύει από …» instead of a range.
 
@@ -194,10 +194,10 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 ```jsonc
 {
   "schemaVersion": 1,
-  "version": "2026-09-18",               // compared for update detection
-  "generatedAt": "2026-09-19T07:57:46+00:00",
-  "sourceDate": "2026-09-18",            // the date printed in the PDF footer
-  "validFrom": "2026-09-21", "validTo": null,   // read off the PDF's own banner
+  "version": "2026-09-25",               // compared for update detection
+  "generatedAt": "2026-09-27T09:51:25+00:00",
+  "sourceDate": "2026-09-25",            // the date printed in the PDF footer
+  "validFrom": "2026-09-28", "validTo": null,   // read off the PDF's own banner
   "days": ["Δευτέρα", "…"],
   "periods": [{ "n": 1, "start": "08:10", "end": "08:55" }],
   "rooms": { "ΕΠ": "Εργαστήριο Πληροφορικής" },
@@ -218,8 +218,9 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 
 `kind` is one of `section` (Α1, Β3, Γ2 …), `track` (Βθ1, Γοικ2, Γθετικό …),
 `kontra` (Γ' electives) or `extra` (τμήμα ένταξης, second foreign language and
-similar). An `extra` may also carry `"parent": "Α2"` — the class it belongs to —
-and then one of two flags: `"parallel": true` says it splits that class for one
+similar). An `extra` may also carry `"parent": "Α2"` — the group it belongs to,
+a class or an orientation (Γοικ2εν sits in on Γοικ2's Οικονομία) — and then one
+of two flags: `"parallel": true` says it splits that class for one
 subject, `"coteach": true` says it does not split anything and a second teacher
 joins that class for the hour — and `name` is what the app calls that teacher
 beside the class's own («Ενισχυτική Διδ.»).
@@ -309,8 +310,8 @@ Three things keep it there, all of which are easy to undo by accident:
 - **Background checks are throttled** to once per `CHECK_INTERVAL_MS` (30 min).
   The «Έλεγχος για νέο πρόγραμμα» button ignores the throttle.
 
-Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 86 KB raw and
-4.8 KB gzipped, so serving it uncompressed costs 18× more.
+Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 88 KB raw and
+5.5 KB gzipped, so serving it uncompressed costs 16× more.
 
 ## Testing
 
@@ -336,7 +337,7 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
 ## Notes and known limits
 
 - **The PDF says when it starts.** Every page carries a banner —
-  «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ 21-9-26», sometimes with an «εως …» end — and the
+  «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ 28-9-26», sometimes with an «εως …» end — and the
   converter reads `validFrom`/`validTo` from it instead of from a flag that is
   easy to forget or mistype. The report prints the banner it found.
 - **Class labels are folded to one spelling.** Whoever types the timetable into
@@ -366,14 +367,20 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
   other looking free — and drops the teacher, who is centred into the *other*
   half. The converter reads the missing rules back out of the drawing commands
   and writes the lesson to every hour the cell spans. The import report lists
-  every merged cell it found (13 in the current revision, all Γλώσσα/Λογοτεχνία).
+  every merged cell it found (13 in the current revision: twelve Γλώσσα/Λογοτεχνία
+  and Βθ2's Φυσική Προσανατολισμού).
 - **Inside a merged cell the teacher is printed as initials** — `ΕΓ`, not
   `ΕΛΕΝΗ ΓΙΑΜΑΛΑΚΗ`. That is the same shape as a room code, so the two can only
   be told apart by lookup: anything that is not a known room is matched against
   the teachers on that same page, narrowed by subject when two of them share
   initials (both ΜΑΡΙΑ ΤΣΙΩΚΟΥ and ΜΑΡΙΑ ΤΣΑΓΚΑΡΑΚΗ are `ΜΤ`; only one teaches
-  Γλώσσα to Γ2). Every resolution is listed in the report; anything unresolved
-  is a warning, never a silent guess.
+  Γλώσσα to Γ2). A teacher whose every other hour is on a different page cannot
+  be found that way, so the second look is at the whole school — and only counts
+  when the initials point at exactly one teacher there (`ΕΝ` on Βθ2's Φυσική
+  Προσανατολισμού is ΕΛΛΗ ΝΑΤΣΑΚΟΥ, who otherwise only teaches Α5). Those say
+  «από άλλη σελίδα» in the report, so a cross-page match is never mistaken for
+  one the page itself proved. Every resolution is listed; anything still
+  unresolved is a warning, never a silent guess.
 - **Period times come from the school's ωράριο, not the PDF.** aSc prints
   whatever times were typed into it and this school's bell does not follow them —
   they were five minutes out on every hour. `periodTimes.times` in
