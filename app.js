@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.9.2';
+const APP_VERSION = '1.9.3';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -944,9 +944,9 @@ function banner({ id, text, actionText, onAction, tone }) {
 
 let checking = false;
 
-async function checkForUpdate({ silent }) {
+async function checkForUpdate({ silent, throttled = silent }) {
   if (checking) return;
-  if (silent) {
+  if (throttled) {
     const last = Number(load(KEY_LAST_CHECK, 0)) || 0;
     if (Date.now() - last < CHECK_INTERVAL_MS) return;
   }
@@ -1222,7 +1222,11 @@ async function boot() {
   startTicking();
   offerPendingSchedule();
   // Skip the check when the bundle we just fetched *is* the remote file.
-  if (!fetchedRemote) checkForUpdate({ silent: true });
+  // Otherwise a cold start always checks, throttle or not: it costs one 304,
+  // and it is the first thing that runs after an app update — which an older
+  // version, one that did not keep the schedule it found, may have been asked
+  // for before its «Νέο πρόγραμμα» banner was tapped.
+  if (!fetchedRemote) checkForUpdate({ silent: true, throttled: false });
 }
 
 boot();

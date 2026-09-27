@@ -314,8 +314,9 @@ Four things keep it there, all of which are easy to undo by accident:
   That one word is a 20× difference on the hot path.
 - **One schedule request per load.** A stored schedule renders straight from
   `localStorage` with no network at all; the background check is what goes out.
-- **Background checks are throttled** to once per `CHECK_INTERVAL_MS` (30 min).
-  The «Έλεγχος για νέο πρόγραμμα» button ignores the throttle.
+- **Background checks are throttled** to once per `CHECK_INTERVAL_MS` (30 min)
+  when the app comes back from the background, which it does dozens of times a
+  day. A cold start and the «Έλεγχος για νέο πρόγραμμα» button always check.
 - **The service worker precaches with `cache: 'no-cache'`, not `'reload'`.** On a
   first visit the page has just downloaded the same files, and on an app update
   most of them (the icons, usually the schedule) have not changed; `no-cache`
