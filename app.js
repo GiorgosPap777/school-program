@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.9.1';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -21,6 +21,7 @@ const KEY_SELECTION = 'gel7.selection.v1';
 const KEY_SCHEDULE = 'gel7.schedule.v1';
 const KEY_DISMISSED = 'gel7.dismissed.v1';
 const KEY_LAST_CHECK = 'gel7.lastcheck.v1';
+const KEY_PENDING = 'gel7.pending.v1';
 
 /* Background checks are cheap (a 304 is header-only) but not free, and a student
    switches back into the app dozens of times a day. Once every half hour is
@@ -958,19 +959,8 @@ async function checkForUpdate({ silent }) {
       return;
     }
     if (load(KEY_DISMISSED, null) === stamp(candidate)) return;
-
-    // Same version stamp, newer file: the school's timetable has not changed,
-    // the import of it has been corrected. Saying «νέο πρόγραμμα» next to a
-    // version the student can already see in the footer just reads as a bug.
-    const corrected = String(candidate.version) === String(state.schedule.version);
-    banner({
-      id: 'newdata',
-      text: corrected
-        ? 'Διορθωμένο πρόγραμμα — υπάρχει ενημερωμένη έκδοση των ίδιων ωρών.'
-        : `Νέο πρόγραμμα (έκδοση ${candidate.version}).`,
-      actionText: 'Ενημέρωση',
-      onAction: () => applySchedule(candidate),
-    });
+    save(KEY_PENDING, candidate);
+    offerSchedule(candidate);
   } catch (err) {
     if (err.kind === 'data') {
       // A broken published file is worth surfacing even on a background check:
@@ -989,10 +979,43 @@ async function checkForUpdate({ silent }) {
   }
 }
 
+function offerSchedule(candidate) {
+  // Same version stamp, newer file: the school's timetable has not changed,
+  // the import of it has been corrected. Saying «νέο πρόγραμμα» next to a
+  // version the student can already see in the footer just reads as a bug.
+  const corrected = String(candidate.version) === String(state.schedule.version);
+  banner({
+    id: 'newdata',
+    text: corrected
+      ? 'Διορθωμένο πρόγραμμα — υπάρχει ενημερωμένη έκδοση των ίδιων ωρών.'
+      : `Νέο πρόγραμμα (έκδοση ${candidate.version}).`,
+    actionText: 'Ενημέρωση',
+    onAction: () => applySchedule(candidate),
+  });
+}
+
+/** A newer schedule found on an earlier visit and not taken yet. Offered again
+    on every open, offline too — otherwise closing the app without tapping the
+    banner hides it until the next background check is due. */
+function offerPendingSchedule() {
+  const raw = load(KEY_PENDING, null);
+  if (!raw) return;
+  let pending = null;
+  try {
+    pending = validateSchedule(raw);
+  } catch (err) { /* fall through and drop it */ }
+  if (!pending || !isNewer(pending, state.schedule) || load(KEY_DISMISSED, null) === stamp(pending)) {
+    localStorage.removeItem(KEY_PENDING);
+    return;
+  }
+  offerSchedule(pending);
+}
+
 function applySchedule(schedule) {
   state.schedule = schedule;
   save(KEY_SCHEDULE, schedule);
   save(KEY_DISMISSED, stamp(schedule));
+  localStorage.removeItem(KEY_PENDING);
 
   const pruned = pruneSelection(state.selection, schedule);
   if (!pruned) {
@@ -1015,25 +1038,35 @@ function applySchedule(schedule) {
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   navigator.serviceWorker.register('sw.js').then((reg) => {
+    const offer = () => banner({
+      id: 'appupdate',
+      text: 'Νέα έκδοση της εφαρμογής.',
+      actionText: 'Επαναφόρτωση',
+      // Whichever version is waiting by the time of the tap, not the one that
+      // raised the banner — a newer deploy may have replaced it since.
+      onAction: () => { if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' }); },
+    });
+    // A version that finished installing on an earlier visit is already waiting,
+    // and updatefound will not fire for it again.
+    if (reg.waiting && navigator.serviceWorker.controller) offer();
     reg.addEventListener('updatefound', () => {
       const sw = reg.installing;
       if (!sw) return;
       sw.addEventListener('statechange', () => {
-        if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-          banner({
-            id: 'appupdate',
-            text: 'Νέα έκδοση της εφαρμογής.',
-            actionText: 'Επαναφόρτωση',
-            onAction: () => { sw.postMessage({ type: 'SKIP_WAITING' }); },
-          });
-        }
+        if (sw.state === 'installed' && navigator.serviceWorker.controller) offer();
       });
     });
   }).catch(() => { /* http:// without a secure context — the app still runs */ });
 
+  // The very first install also takes control of this page, which fires
+  // controllerchange with nothing to replace. Reloading then would throw away
+  // whatever the student has already tapped in the picker.
+  let controlled = Boolean(navigator.serviceWorker.controller);
   let reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloading) return;
+    const replaced = controlled;
+    controlled = true;
+    if (!replaced || reloading) return;
     reloading = true;
     location.reload();
   });
@@ -1187,6 +1220,7 @@ async function boot() {
 
   setView('today');
   startTicking();
+  offerPendingSchedule();
   // Skip the check when the bundle we just fetched *is* the remote file.
   if (!fetchedRemote) checkForUpdate({ silent: true });
 }

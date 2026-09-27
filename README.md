@@ -164,6 +164,13 @@ cached, and shows a «Νέο πρόγραμμα» banner when something newer ap
 student taps to apply it — the timetable never changes underneath them mid-look.
 A payload that fails validation is refused and the last good schedule is kept.
 
+Both update banners — «Νέο πρόγραμμα» and «Νέα έκδοση της εφαρμογής» — come
+back on every open until tapped. The downloaded schedule is kept aside
+(`gel7.pending.v1`) so it is offered again straight away, offline too, rather
+than only when the next half-hourly check comes round; and an app version that
+finished installing on an earlier visit is offered from `reg.waiting`, since the
+browser never fires `updatefound` for it a second time.
+
 ---
 
 ## Layout

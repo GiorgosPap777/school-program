@@ -234,9 +234,13 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
   -webkit-overflow-scrolling: touch;
 }
 .daystrip::-webkit-scrollbar { display: none; }
+/* The five days share the row instead of each taking its own width: sized to
+   their labels they need ~384px next to «Πλέγμα», so on a 360/375px phone
+   Friday was cut in half. Still no narrower than the label, so a screen too
+   small even for that scrolls the strip rather than squashing the text. */
 .daystrip__btn {
-  flex: 0 0 auto;
-  padding: 8px 11px;
+  flex: 1 1 0; max-width: 72px;
+  padding: 8px 2px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface);
@@ -372,6 +376,9 @@ table.grid td.is-conflict { background: var(--warn-bg); }
 }
 .sheet__bar h2 { flex: 1; font-size: 1.05rem; font-weight: 650; }
 .sheet__body { flex: 1; overflow-y: auto; padding: var(--pad); display: flex; flex-direction: column; gap: 18px; }
+/* A sheet with no footer ends on its body, which then has to clear the home
+   indicator itself. */
+.sheet__body:last-child { padding-bottom: calc(var(--safe-bottom) + var(--pad)); }
 .sheet__foot {
   padding: 12px var(--pad) calc(var(--safe-bottom) + 14px);
   border-top: 1px solid var(--border);
@@ -404,11 +411,14 @@ table.grid td.is-conflict { background: var(--warn-bg); }
 .chip small { display: block; font-size: .72rem; font-weight: 400; opacity: .75; }
 
 .hint { font-size: .8rem; color: var(--muted); margin-bottom: 10px; min-height: 1.2em; }
-.steps { display: flex; flex-direction: column; gap: 12px; counter-reset: s; font-size: .93rem; }
-.steps li { display: flex; gap: 10px; align-items: baseline; }
+.steps { display: flex; flex-direction: column; gap: 12px; counter-reset: s; font-size: .93rem; line-height: 1.45; }
+/* A step is one sentence with bold words and an icon inside it. As a flex row,
+   every text run and <strong> became its own item and the sentence broke into
+   side-by-side columns on a phone, so the number hangs in the padding instead. */
+.steps li { position: relative; padding-left: 32px; min-height: 22px; }
 .steps li::before {
   counter-increment: s; content: counter(s);
-  flex: 0 0 auto;
+  position: absolute; left: 0; top: 0;
   display: grid; place-items: center;
   width: 22px; height: 22px; border-radius: 50%;
   background: var(--accent-soft); color: var(--accent);
