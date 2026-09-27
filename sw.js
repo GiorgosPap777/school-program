@@ -3,7 +3,7 @@
    Bump APP_VERSION whenever you change any shell file — the cache name derives
    from it, so a new version installs cleanly and the old one is swept away. */
 
-const APP_VERSION = '1.9.1';
+const APP_VERSION = '1.9.2';
 const SHELL_CACHE = `gel7-shell-${APP_VERSION}`;
 const DATA_CACHE = 'gel7-data';
 const DATA_TIMEOUT_MS = 3000;
@@ -24,12 +24,17 @@ const SHELL = [
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(SHELL_CACHE);
+    // 'no-cache' asks the server every time, so a new version never caches a
+    // stale file, but anything unchanged — the files the page itself loaded a
+    // moment ago on a first visit, the icons on every update — comes back as a
+    // header-only 304. 'reload' downloaded all of it again: 82 KB for a first
+    // install instead of ~40.
     // One bad URL must not fail the whole install, so add them individually.
     await Promise.all(SHELL.map((url) =>
-      cache.add(new Request(url, { cache: 'reload' })).catch(() => {})));
+      cache.add(new Request(url, { cache: 'no-cache' })).catch(() => {})));
     // Seed the data cache so the very first offline open still has a timetable.
     const data = await caches.open(DATA_CACHE);
-    await data.add(new Request('data/schedule.json', { cache: 'reload' })).catch(() => {});
+    await data.add(new Request('data/schedule.json', { cache: 'no-cache' })).catch(() => {});
   })());
 });
 

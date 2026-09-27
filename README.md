@@ -297,16 +297,16 @@ Measured against the container with gzip on:
 
 | What | Bytes on the wire |
 |---|---|
-| First install (whole app + schedule) | **39 KB** |
+| First install (whole app + schedule) | **45 KB** |
 | Returning student, app already installed | **~900 B** (three 304s) |
 | Background update check, nothing new | **~300 B** |
 | The day a new schedule is published | **~6 KB** |
 
 At 5 Mbit/s up (~537 KB/s usable), 600 students all opening the app on the same
 morning costs about **one second** of uplink. A whole school installing it for the
-first time simultaneously is ~44 s — and that never happens at once in practice.
+first time simultaneously is ~50 s — and that never happens at once in practice.
 
-Three things keep it there, all of which are easy to undo by accident:
+Four things keep it there, all of which are easy to undo by accident:
 
 - **`fetch(..., { cache: 'no-cache' })`, never `'no-store'`.** `no-store` skips the
   validator and re-downloads the full schedule on every check; `no-cache` still
@@ -316,9 +316,15 @@ Three things keep it there, all of which are easy to undo by accident:
   `localStorage` with no network at all; the background check is what goes out.
 - **Background checks are throttled** to once per `CHECK_INTERVAL_MS` (30 min).
   The «Έλεγχος για νέο πρόγραμμα» button ignores the throttle.
+- **The service worker precaches with `cache: 'no-cache'`, not `'reload'`.** On a
+  first visit the page has just downloaded the same files, and on an app update
+  most of them (the icons, usually the schedule) have not changed; `no-cache`
+  gets those back as 304s. `reload` fetched everything again — 76 KB for a first
+  install instead of 45 KB, and every icon re-sent on every update.
 
 Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 88 KB raw and
-5.5 KB gzipped, so serving it uncompressed costs 16× more.
+5.6 KB gzipped, so serving it uncompressed costs 16× more. nginx's default
+`gzip_comp_level` of 1 only gets it to 7.8 KB; the bundled config sets 6.
 
 ## Testing
 
