@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.9.3';
+const APP_VERSION = '1.9.4';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -164,7 +164,10 @@ function tagged(kind, message) {
   return err;
 }
 
-async function fetchSchedule(url) {
+/** `fresh` is for update checks: the service worker answers from its cache
+    when the network is down, which is right for a first load and no answer at
+    all to «is there anything newer?». */
+async function fetchSchedule(url, { fresh = false } = {}) {
   let res;
   try {
     // 'no-cache' still revalidates on every call, but sends If-None-Match, so an
@@ -175,6 +178,10 @@ async function fetchSchedule(url) {
     throw tagged('network', err.message);
   }
   if (!res.ok) throw tagged('network', `HTTP ${res.status}`);
+  // sw.js labels its fallback copy; see labelledStale() there.
+  if (fresh && res.headers.get('X-Served-From') === 'cache') {
+    throw tagged('network', 'χωρίς σύνδεση — απάντησε η αποθηκευμένη έκδοση');
+  }
 
   let payload;
   try {
@@ -483,9 +490,12 @@ function renderStatusCard(date, status, rolled, listedDay) {
   // Mid-day with no lesson running: a free period, a break, or before the bell.
   const upcoming = findNext(grid, status.dayIdx, status.next >= 0 ? status.next : today.length);
   const startMins = hm(state.schedule.periods[upcoming.p].start);
-  const head = status.current >= 0
-    ? 'Κενό'
-    : (status.mins < status.bounds[0].start ? 'Πριν το πρώτο μάθημα' : 'Διάλειμμα');
+  // «Before the first lesson» means the student's own first lesson, not the
+  // school's first bell: Α4 starts at 09:00 on Mondays, and at 08:20 they are
+  // not sitting through a free period — they have not arrived yet.
+  const first = today.findIndex(Boolean);
+  const head = status.mins < status.bounds[first].start ? 'Πριν το πρώτο μάθημα'
+    : status.current >= 0 ? 'Κενό' : 'Διάλειμμα';
   card.innerHTML = dayLine + headline(head)
     + detail(`${upcoming.lesson.subject} ${durationText(startMins - status.mins)}`
       + ` (${state.schedule.periods[upcoming.p].start})`);
@@ -952,7 +962,7 @@ async function checkForUpdate({ silent, throttled = silent }) {
   }
   checking = true;
   try {
-    const candidate = await fetchSchedule(REMOTE_SCHEDULE_URL);
+    const candidate = await fetchSchedule(REMOTE_SCHEDULE_URL, { fresh: true });
     save(KEY_LAST_CHECK, Date.now());
     if (!isNewer(candidate, state.schedule)) {
       if (!silent) banner({ id: 'uptodate', text: 'Το πρόγραμμα είναι ενημερωμένο.' });

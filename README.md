@@ -135,10 +135,11 @@ so without a bump the old files stay cached on every installed phone.
    validity banner it read, and any timetable collisions.
    A clean report means the import is trustworthy; if something is listed, add
    it to `tools/aliases.json` and re-run.
-4. Check the invariants still hold:
+4. Check the invariants still hold, in the data and in what the app makes of it:
 
    ```bash
    python3 tools/test/schedule.test.py
+   node tools/test/app.test.mjs
    ```
 
 5. Publish. Either redeploy the folder, or — if you set `REMOTE_SCHEDULE_URL`
@@ -278,7 +279,8 @@ is the group's `name` in `aliases.json` (and `shortName` in the week grid, where
 a cell has no room for the long one), not a string in the app.
 
 Where the class has **no** lesson that hour, the hour still runs — with the
-ενισχυτική teacher on their own. Α2 has four of those. They appear as ordinary
+ενισχυτική teacher on their own. (The 21-9-26 revision had four of those for Α2;
+the current one has none.) They appear as ordinary
 lessons in the class's own room, under a line saying why they are there, because
 a lesson the student is expected to turn up to is not something to drop for
 tidiness. The report lists every one.
@@ -331,8 +333,16 @@ Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 88 KB raw 
 
 ```bash
 node tools/test/sw.test.mjs           # service worker caching strategies
+node tools/test/app.test.mjs          # merge + clock logic, every pickable selection
 python3 tools/test/schedule.test.py   # data invariants
 ```
+
+`app.test.mjs` loads `app.js` into a sandbox and runs the merge against every
+selection the picker can offer (196 today): no «Σύγκρουση», no lesson silently
+lost, split groups and τμήματα ένταξης behaving, Γυμναστική never given a room.
+Those are written as invariants over whatever `schedule.json` holds, so a new
+import does not need the test edited. The status-card and update-check cases
+run against a small hand-made timetable instead.
 
 `tools/test/make_fixtures.py` builds the schedule variants used to exercise the
 update path by hand (a newer revision, one that drops a track, one that introduces

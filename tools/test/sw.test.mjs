@@ -24,7 +24,12 @@ class MockCache {
     if (!res.ok) throw new Error('add failed');
     this.store.set(this.key(req), res);
   }
-  async match(req) { return this.store.get(this.key(req)); }
+  // A real Cache hands out a fresh Response every time, so its body can be
+  // read again by the next test.
+  async match(req) {
+    const hit = this.store.get(this.key(req));
+    return hit && hit.clone();
+  }
 }
 
 class MockCacheStorage {
@@ -52,10 +57,7 @@ async function mockFetch(req) {
   const url = new URL(typeof req === 'string' ? req : req.url, ORIGIN);
   if (!network.online) throw new TypeError('Failed to fetch');
   if (network.delayMs) await new Promise((r) => setTimeout(r, network.delayMs));
-  return {
-    ok: true, status: 200, url: url.href, _body: network.body,
-    clone() { return { ...this, clone: () => this }; },
-  };
+  return new Response(network.body, { status: 200 });
 }
 
 /* --------------------------------------------------------------- run sw.js */
@@ -81,7 +83,7 @@ class MockRequest {
 
 const sandbox = {
   self, caches: new MockCacheStorage(), fetch: mockFetch,
-  URL, Request: MockRequest,
+  URL, Request: MockRequest, Response, Headers,
   setTimeout, clearTimeout, Promise, Error, console,
 };
 sandbox.globalThis = sandbox;
@@ -153,21 +155,31 @@ await test('activate sweeps caches from older app versions', async () => {
 
 await test('schedule.json is served from the network when online', async () => {
   network = { online: true, delayMs: 0, body: 'v2' };
-  const res = await dispatch('fetch', { request: request('/data/schedule.json') });
-  assert.equal((await res)._body, 'v2', 'fresh copy wins');
+  const res = await (await dispatch('fetch', { request: request('/data/schedule.json') }));
+  assert.equal(await res.text(), 'v2', 'fresh copy wins');
+  assert.equal(res.headers.get('X-Served-From'), null, 'a fresh copy is not labelled');
 });
 
 await test('schedule.json falls back to cache when offline', async () => {
   network = { online: false, delayMs: 0, body: 'unused' };
-  const res = await dispatch('fetch', { request: request('/data/schedule.json') });
-  assert.equal((await res)._body, 'v2', 'serves the last good copy');
+  const res = await (await dispatch('fetch', { request: request('/data/schedule.json') }));
+  assert.equal(await res.text(), 'v2', 'serves the last good copy');
+});
+
+await test('the offline fallback says it came from the cache', async () => {
+  // Without the label the app's update check cannot tell «no signal» from
+  // «nothing new», and tells a student with no connection it is up to date.
+  network = { online: false, delayMs: 0, body: 'unused' };
+  const res = await (await dispatch('fetch', { request: request('/data/schedule.json') }));
+  assert.equal(res.headers.get('X-Served-From'), 'cache');
+  assert.equal(res.status, 200, 'still a usable response for a first load');
 });
 
 await test('a slow network does not stall the schedule fetch', async () => {
   network = { online: true, delayMs: 5000, body: 'too-slow' };
   const started = Date.now();
-  const res = await dispatch('fetch', { request: request('/data/schedule.json') });
-  const body = (await res)._body;
+  const res = await (await dispatch('fetch', { request: request('/data/schedule.json') }));
+  const body = await res.text();
   const elapsed = Date.now() - started;
   assert.equal(body, 'v2', 'times out to the cached copy');
   assert.ok(elapsed < 4000, `fell back after ${elapsed}ms, not the full 5s`);

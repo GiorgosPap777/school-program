@@ -3,7 +3,7 @@
    Bump APP_VERSION whenever you change any shell file — the cache name derives
    from it, so a new version installs cleanly and the old one is swept away. */
 
-const APP_VERSION = '1.9.3';
+const APP_VERSION = '1.9.4';
 const SHELL_CACHE = `gel7-shell-${APP_VERSION}`;
 const DATA_CACHE = 'gel7-data';
 const DATA_TIMEOUT_MS = 3000;
@@ -70,9 +70,21 @@ async function networkFirst(request) {
     throw new Error(`HTTP ${response && response.status}`);
   } catch (err) {
     const cached = await cache.match(request, { ignoreSearch: true });
-    if (cached) return cached;
+    if (cached) return labelledStale(cached);
     throw err;
   }
+}
+
+/** The cached copy, marked as one. Unmarked, a fallback is indistinguishable
+    from a fresh 200 to the page, so «Έλεγχος για νέο πρόγραμμα» with no signal
+    at all reported «ενημερωμένο» — and throttled the next real check. app.js
+    looks for this header on update checks and treats it as being offline. */
+function labelledStale(response) {
+  const headers = new Headers(response.headers);
+  headers.set('X-Served-From', 'cache');
+  return new Response(response.body, {
+    status: response.status, statusText: response.statusText, headers,
+  });
 }
 
 async function cacheFirst(request) {
