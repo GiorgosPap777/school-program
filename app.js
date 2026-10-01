@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.9.4';
+const APP_VERSION = '1.10.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -22,6 +22,8 @@ const KEY_SCHEDULE = 'gel7.schedule.v1';
 const KEY_DISMISSED = 'gel7.dismissed.v1';
 const KEY_LAST_CHECK = 'gel7.lastcheck.v1';
 const KEY_PENDING = 'gel7.pending.v1';
+// index.html reads this one too, before anything is drawn — see the <head>.
+const KEY_THEME = 'gel7.theme.v1';
 
 /* Background checks are cheap (a 304 is header-only) but not free, and a student
    switches back into the app dozens of times a day. Once every half hour is
@@ -43,6 +45,7 @@ const state = {
   showGrid: false,
   draft: null,
   deferredInstall: null,
+  theme: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -403,6 +406,7 @@ function render() {
   if (!state.weekDayPinned) state.weekDay = listedDay;
 
   renderBar();
+  $('tab-today').textContent = todayTabLabel(status, rolled, listedDay);
   renderStatusCard(date, status, rolled, listedDay);
   renderDayList($('todayList'), listedDay, status, rolled);
   renderDayStrip(status);
@@ -426,6 +430,19 @@ function nextLessonDay(status) {
   const from = status.schoolDay ? (status.dayIdx + 1) % days : 0;
   const next = findNext(state.grid, from, 0);
   return next ? next.d : from;
+}
+
+/** What the today tab is called. Once today is over it lists another day, and
+    a tab still reading «Σήμερα» above tomorrow's lessons passes them off as
+    today's — to a student who has just walked out of school, the wrong ones. */
+function todayTabLabel(status, rolled, listedDay) {
+  return rolled ? dayHeading(status, listedDay) : 'Σήμερα';
+}
+
+/** «Αύριο · Πέμπτη» when the day is tomorrow, otherwise just its name. */
+function dayHeading(status, dayIdx) {
+  const name = state.schedule.days[dayIdx];
+  return dayIdx === (status.dayIdx + 1) % 7 ? `Αύριο · ${name}` : name;
 }
 
 function renderBar() {
@@ -509,10 +526,7 @@ function renderDayList(target, dayIdx, status, withHeading) {
   if (withHeading) {
     const head = document.createElement('li');
     head.className = 'daylabel';
-    const tomorrow = (dayIndex(now()) + 1) % 7;
-    head.textContent = dayIdx === tomorrow
-      ? `Αύριο · ${state.schedule.days[dayIdx]}`
-      : state.schedule.days[dayIdx];
+    head.textContent = dayHeading(status, dayIdx);
     target.appendChild(head);
   }
 
@@ -924,6 +938,258 @@ function pruneSelection(selection, schedule) {
   return next.section ? next : null;
 }
 
+/* ------------------------------------------------------------------- themes */
+
+/** The presets themselves are [data-theme] blocks in app.css. All this file
+    needs is what to call them, and the colour of the phone's status bar in
+    light and dark mode (`chrome`) — that one is a <meta>, out of the
+    stylesheet's reach, so it is kept in step with app.css by hand. */
+const THEMES = [
+  { id: 'default', name: 'Προεπιλογή', chrome: ['#1d4ed8', '#0b1020'] },
+  { id: 'amoled', name: 'AMOLED', chrome: ['#000000', '#000000'] },
+  { id: 'pink', name: 'Ροζ', chrome: ['#db2777', '#1a0e14'] },
+];
+const CUSTOM_THEME = { id: 'custom', name: 'Δικά σου' };
+
+const HEX_COLOUR = /^#[0-9a-f]{6}$/i;
+
+function asHex(value) {
+  const text = String(value || '').trim().toLowerCase();
+  return HEX_COLOUR.test(text) ? text : null;
+}
+
+/** "#1d4ed8" -> [29, 78, 216], and back. */
+function rgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [n >> 16, (n >> 8) & 255, n & 255];
+}
+
+function toHex(channels) {
+  return '#' + channels.map((c) => Math.round(c).toString(16).padStart(2, '0')).join('');
+}
+
+/** `t` of the way from colour a to colour b. */
+function mix(a, b, t) {
+  const from = rgb(a), to = rgb(b);
+  return toHex(from.map((c, i) => c + (to[i] - c) * t));
+}
+
+/** WCAG relative luminance and contrast ratio, 1 to 21. */
+function luminance(colour) {
+  const [r, g, b] = rgb(colour).map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrast(a, b) {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** `colour`, pushed toward `toward` only as far as it takes to read at `min`:1
+    on every one of `against`. When even `toward` cannot, it is the best there is. */
+function readable(colour, toward, against, min) {
+  const backs = [].concat(against);
+  for (let step = 0; step <= 20; step++) {
+    const c = mix(colour, toward, step / 20);
+    if (backs.every((b) => contrast(c, b) >= min)) return c;
+  }
+  return toward;
+}
+
+/** Everything app.css takes from a theme, out of the two colours a student
+    picked. Only those two are theirs: the cards, borders and soft tints follow
+    from them, and every colour that carries text is checked against what it
+    sits on. A pale yellow main colour must not leave white letters on the
+    buttons, and lessons on a mid-grey background still have to be readable. */
+function customPalette(accent, bg) {
+  const dark = contrast(bg, '#ffffff') > contrast(bg, '#000000');
+  const ink = dark ? '#ffffff' : '#000000';
+  // Anything text sits on keeps its distance from the text colour. A pink in
+  // the middle of the range barely takes white text as it is, and cards a
+  // shade lighter than it — as cards are in a dark theme — would not at all.
+  const under = (c) => readable(c, dark ? '#000000' : '#ffffff', ink, 5.5);
+  const surface = under(mix(bg, '#ffffff', dark ? 0.05 : 0.7));
+  const surface2 = under(mix(mix(bg, ink, dark ? 0.09 : 0.04), accent, 0.05));
+  const accentSoft = under(mix(surface, accent, dark ? 0.2 : 0.13));
+  const nowBg = under(mix(surface, '#f59e0b', dark ? 0.16 : 0.12));
+  const warnBg = under(mix(surface, '#ef4444', dark ? 0.14 : 0.09));
+  const text = readable(mix(ink, bg, 0.1), ink, [bg, surface, surface2, accentSoft, nowBg, warnBg], 7);
+  return {
+    chrome: dark ? bg : accent,
+    vars: {
+      'color-scheme': dark ? 'dark' : 'light',
+      '--bg': bg,
+      '--surface': surface,
+      '--surface-2': surface2,
+      '--text': text,
+      '--muted': readable(mix(text, bg, 0.42), text, [bg, surface, surface2], 4.5),
+      '--border': mix(mix(bg, ink, dark ? 0.15 : 0.11), accent, 0.06),
+      '--accent': accent,
+      '--accent-text': contrast(accent, '#ffffff') >= contrast(accent, '#000000') ? '#ffffff' : '#000000',
+      '--accent-soft': accentSoft,
+      '--accent-ink': readable(accent, text, accentSoft, 4.5),
+      '--now': readable(dark ? '#fcd34d' : '#b45309', text, nowBg, 4.5),
+      '--now-bg': nowBg,
+      '--warn': readable(dark ? '#ff9d94' : '#b42318', text, warnBg, 4.5),
+      '--warn-bg': warnBg,
+      '--shadow': dark
+        ? '0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .35)'
+        : '0 1px 2px rgba(16, 24, 40, .06), 0 8px 24px rgba(16, 24, 40, .06)',
+    },
+  };
+}
+
+/** The saved theme, or the default one. Custom colours are remembered while
+    a preset is on, so going back to «Δικά σου» finds them where they were. */
+function loadTheme() {
+  const raw = load(KEY_THEME, null) || {};
+  const known = THEMES.concat(CUSTOM_THEME).some((t) => t.id === raw.preset);
+  return { preset: known ? raw.preset : 'default', accent: asHex(raw.accent), bg: asHex(raw.bg) };
+}
+
+/** Repaint the whole app in `theme`. Returns the custom properties it had to
+    set by hand, which is what index.html replays on the next launch. */
+function applyTheme(theme) {
+  const root = document.documentElement;
+  const custom = theme.preset === 'custom' && theme.accent && theme.bg
+    ? customPalette(theme.accent, theme.bg) : null;
+  root.removeAttribute('style');
+  if (custom || THEMES.some((t) => t.id === theme.preset && t.id !== 'default')) {
+    root.setAttribute('data-theme', theme.preset);
+  } else {
+    root.removeAttribute('data-theme');
+  }
+  if (custom) {
+    for (const [name, value] of Object.entries(custom.vars)) root.style.setProperty(name, value);
+  }
+  const chrome = custom ? [custom.chrome, custom.chrome]
+    : (THEMES.find((t) => t.id === theme.preset) || THEMES[0]).chrome;
+  document.querySelector('meta[name="theme-color"][media*="light"]').setAttribute('content', chrome[0]);
+  document.querySelector('meta[name="theme-color"][media*="dark"]').setAttribute('content', chrome[1]);
+  return custom ? custom.vars : null;
+}
+
+function setTheme(theme) {
+  state.theme = theme;
+  const vars = applyTheme(theme);
+  save(KEY_THEME, vars ? { ...theme, vars } : theme);
+}
+
+function openThemeSheet() {
+  renderThemeSheet();
+  $('themeSheet').showModal();
+}
+
+function renderThemeSheet() {
+  const theme = state.theme;
+  const body = $('themeBody');
+  body.innerHTML = '';
+
+  const options = document.createElement('div');
+  options.className = 'themes';
+  for (const t of THEMES.concat(CUSTOM_THEME)) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'theme-opt' + (theme.preset === t.id ? ' is-on' : '');
+    btn.setAttribute('aria-pressed', String(theme.preset === t.id));
+    // Each preview is a little copy of the app wearing that theme: the
+    // [data-theme] blocks in app.css apply to it as they would to the page.
+    btn.innerHTML = `<span class="swatch" data-theme="${t.id}" aria-hidden="true">`
+      + '<span class="swatch__bar"></span><span class="swatch__card">'
+      + '<span class="swatch__dot"></span><span class="swatch__line"></span></span></span>'
+      + esc(t.name);
+    btn.addEventListener('click', () => chooseTheme(t.id));
+    options.appendChild(btn);
+  }
+  const presets = document.createElement('div');
+  presets.className = 'field';
+  presets.innerHTML = '<p class="field__label">Χρώματα</p>'
+    + '<p class="field__note">Το AMOLED είναι πάντα μαύρο. Η Προεπιλογή και το Ροζ'
+    + ' ακολουθούν το φωτεινό ή σκοτεινό θέμα του κινητού.</p>';
+  presets.appendChild(options);
+  body.appendChild(presets);
+  paintCustomSwatch();
+
+  if (theme.preset !== 'custom') return;
+  const own = document.createElement('div');
+  own.className = 'field';
+  own.innerHTML = '<p class="field__label">Δικά σου χρώματα</p>'
+    + '<p class="field__note">Τα γράμματα γίνονται μόνα τους μαύρα ή άσπρα,'
+    + ' ώστε να διαβάζονται πάντα.</p>';
+  const rows = document.createElement('div');
+  rows.className = 'colors';
+  rows.appendChild(colourRow('accent', 'Κύριο χρώμα'));
+  rows.appendChild(colourRow('bg', 'Φόντο'));
+  own.appendChild(rows);
+  body.appendChild(own);
+}
+
+/** The «Δικά σου» preview shows the student's own colours, once there are any. */
+function paintCustomSwatch() {
+  const swatch = document.querySelector('.swatch[data-theme="custom"]');
+  if (!swatch) return;
+  const { accent, bg } = state.theme;
+  swatch.removeAttribute('style');
+  swatch.classList.toggle('swatch--any', !(accent && bg));
+  if (!(accent && bg)) return;
+  for (const [name, value] of Object.entries(customPalette(accent, bg).vars)) {
+    swatch.style.setProperty(name, value);
+  }
+}
+
+function chooseTheme(id) {
+  const theme = { ...state.theme, preset: id };
+  if (id === 'custom' && !(theme.accent && theme.bg)) {
+    // Start from whatever is on screen, so the first tap changes nothing and
+    // the student adjusts from there instead of from an arbitrary colour.
+    const css = getComputedStyle(document.documentElement);
+    theme.accent = asHex(css.getPropertyValue('--accent')) || THEMES[0].chrome[0];
+    theme.bg = asHex(css.getPropertyValue('--bg')) || '#f4f5f7';
+  }
+  setTheme(theme);
+  renderThemeSheet();
+}
+
+/** A colour picker for the look of it, and the hex beside it for an exact
+    value — not every phone's picker lets you type one in. */
+function colourRow(key, label) {
+  const row = document.createElement('div');
+  row.className = 'color-row';
+  row.innerHTML = `<label class="color-row__name" for="pick-${key}">${esc(label)}</label>`
+    + `<input type="text" class="color-row__hex" value="${state.theme[key]}" maxlength="7"`
+    + ` spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="${esc(label)} σε hex">`
+    + `<input type="color" id="pick-${key}" value="${state.theme[key]}">`;
+  const [text, picker] = row.querySelectorAll('input');
+  // Not re-rendered on every change: rebuilding the sheet would pull the input
+  // out from under a finger that is still dragging across the colour picker.
+  const set = (value) => {
+    setTheme({ ...state.theme, [key]: value });
+    paintCustomSwatch();
+  };
+  picker.addEventListener('input', () => {
+    text.value = picker.value;
+    text.removeAttribute('aria-invalid');
+    set(picker.value);
+  });
+  text.addEventListener('input', () => {
+    const value = asHex(text.value.trim().replace(/^#?/, '#'));
+    text.setAttribute('aria-invalid', String(!value));
+    if (!value) return;
+    picker.value = value;
+    set(value);
+  });
+  // On leaving the field, show what is actually in use — tidied, or put back
+  // if what was typed never became a colour.
+  text.addEventListener('change', () => {
+    text.value = state.theme[key];
+    text.removeAttribute('aria-invalid');
+  });
+  return row;
+}
+
 /* ------------------------------------------------------------------ banners */
 
 function banner({ id, text, actionText, onAction, tone }) {
@@ -1149,7 +1415,9 @@ function wire() {
   });
 
   $('settingsBtn').addEventListener('click', openPicker);
+  $('themeBtn').addEventListener('click', openThemeSheet);
   $('pickerClose').addEventListener('click', () => $('picker').close());
+  $('themeClose').addEventListener('click', () => $('themeSheet').close());
   $('iosClose').addEventListener('click', () => $('iosSheet').close());
 
   $('pickerSave').addEventListener('click', () => {
@@ -1205,6 +1473,10 @@ function wire() {
 /* ---------------------------------------------------------------------- boot */
 
 async function boot() {
+  // index.html has already put the colours up; this catches the status bar,
+  // and anything the <head> could not make sense of falls back to the default.
+  state.theme = loadTheme();
+  applyTheme(state.theme);
   wire();
   setupInstall();
   registerServiceWorker();

@@ -17,6 +17,21 @@
 <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
 <link rel="stylesheet" href="app.css">
+<script>
+/* The student's colours, before anything is drawn. app.js only runs once the
+   page below has been parsed, which is late enough to flash the default blue
+   on every launch. Mirrors applyTheme() there, which does the rest. */
+(function () {
+  try {
+    var theme = JSON.parse(localStorage.getItem('gel7.theme.v1'));
+    var root = document.documentElement;
+    if (!theme || !/^(amoled|pink|custom)$/.test(theme.preset)) return;
+    root.setAttribute('data-theme', theme.preset);
+    if (theme.preset !== 'custom' || !theme.vars) return;
+    for (var prop in theme.vars) root.style.setProperty(prop, theme.vars[prop]);
+  } catch (err) { /* no storage, or nothing usable in it: the default colours */ }
+})();
+</script>
 </head>
 <body>
 
@@ -32,6 +47,10 @@
     <button type="button" id="installBtn" class="icon-btn" hidden
             aria-label="Εγκατάσταση εφαρμογής" title="Εγκατάσταση">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+    </button>
+    <button type="button" id="themeBtn" class="icon-btn"
+            aria-label="Εμφάνιση" title="Εμφάνιση">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1 0 1.7-.8 1.7-1.7 0-.5-.2-.9-.5-1.2a1.7 1.7 0 0 1 1.3-2.9H17a4 4 0 0 0 4-4C21 6.8 17 3 12 3Z"/><circle cx="7.5" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="9.5" cy="7.6" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="7.3" r="1.1" fill="currentColor" stroke="none"/><circle cx="17.4" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg>
     </button>
     <button type="button" id="settingsBtn" class="icon-btn"
             aria-label="Αλλαγή τμήματος" title="Αλλαγή τμήματος">
@@ -86,6 +105,19 @@
       <button type="button" id="pickerSave" class="primary-btn">Αποθήκευση</button>
     </div>
   </form>
+</dialog>
+
+<!-- Colour theme -->
+<dialog id="themeSheet" class="sheet" aria-labelledby="themeTitle">
+  <div class="sheet__inner">
+    <div class="sheet__bar">
+      <h2 id="themeTitle">Εμφάνιση</h2>
+      <button type="button" id="themeClose" class="icon-btn" aria-label="Κλείσιμο">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="sheet__body" id="themeBody"></div>
+  </div>
 </dialog>
 
 <!-- iOS install instructions -->

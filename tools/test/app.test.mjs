@@ -266,6 +266,86 @@ await test('status card: the right headline at each point of the day', async () 
   }
 });
 
+await test('the today tab names the day it shows once today is over', async () => {
+  const label = (iso) => {
+    state.schedule = TINY;
+    state.grid = app('buildGrid')(TINY, X1).grid;
+    const status = app('clockStatus')(TINY, new Date(iso));
+    const rolled = app('dayIsOver')(status);
+    const listed = rolled ? app('nextLessonDay')(status) : status.dayIdx;
+    return app('todayTabLabel')(status, rolled, listed);
+  };
+  const cases = [
+    ['2026-10-05T07:30', 'Σήμερα'],
+    ['2026-10-05T11:00', 'Σήμερα'],
+    ['2026-10-05T12:00', 'Αύριο · Τρίτη'],
+    // Friday afternoon and Saturday both list Monday, which is not tomorrow.
+    ['2026-10-09T12:00', 'Δευτέρα'],
+    ['2026-10-10T12:00', 'Δευτέρα'],
+    ['2026-10-11T12:00', 'Αύριο · Δευτέρα'],
+  ];
+  for (const [iso, want] of cases) assert.equal(label(iso), want, `at ${iso}`);
+});
+
+await test('custom colours always leave text readable', async () => {
+  const customPalette = app('customPalette');
+  const contrast = app('contrast');
+  // Every pairing a student could plausibly pick, and the ones that are hard:
+  // pure white and black, a mid grey that sits between them, pale accents on
+  // pale backgrounds and dark on dark.
+  const colours = ['#ffffff', '#000000', '#808080', '#767676', '#f4f5f7', '#ffd000',
+    '#ffff00', '#1d4ed8', '#7d9dff', '#db2777', '#ff69b4', '#1db954', '#003366',
+    '#3b0764', '#fef3c7', '#e11d48', '#0b1020', '#9ca3af'];
+  const bad = [];
+  for (const accent of colours) {
+    for (const bg of colours) {
+      const v = customPalette(accent, bg).vars;
+      const pairs = [
+        ['text on background', v['--text'], v['--bg'], 4.5],
+        ['text on cards', v['--text'], v['--surface'], 4.5],
+        ['grey text on cards', v['--muted'], v['--surface'], 4.5],
+        ['button text', v['--accent-text'], v['--accent'], 4.5],
+        ['«Επόμενο» tag', v['--accent-ink'], v['--accent-soft'], 4.5],
+        ['running lesson', v['--now'], v['--now-bg'], 4.5],
+        ['warning', v['--warn'], v['--warn-bg'], 4.5],
+      ];
+      for (const [what, fg, back, min] of pairs) {
+        const ratio = contrast(fg, back);
+        if (ratio < min) bad.push(`${accent} on ${bg}: ${what} ${fg}/${back} is ${ratio.toFixed(2)}:1`);
+      }
+    }
+  }
+  assert.equal(bad.length, 0, `${bad.length} unreadable: ${bad.slice(0, 4).join('; ')}`);
+});
+
+await test('every theme app.js offers is one index.html and app.css know', async () => {
+  const html = readFileSync(resolve(root, 'index.html'), 'utf8');
+  const css = readFileSync(resolve(root, 'app.css'), 'utf8');
+  const themes = app('THEMES');
+  // The <head> applies the saved theme before app.js has loaded, from the
+  // same storage key and for the same set of names.
+  assert.ok(html.includes(`'${app('KEY_THEME')}'`), 'index.html reads a different key');
+  const listed = /\^\(([a-z|]+)\)\$/.exec(html);
+  assert.ok(listed, 'no theme list found in index.html');
+  assert.deepEqual(listed[1].split('|').sort(),
+    Array.from(themes.filter((t) => t.id !== 'default'), (t) => t.id).concat('custom').sort());
+  for (const t of themes) {
+    if (t.id !== 'default') assert.ok(css.includes(`[data-theme="${t.id}"]`), `app.css has no ${t.id}`);
+    for (const c of t.chrome) assert.ok(css.includes(c), `${t.id}'s status bar ${c} is in no theme`);
+  }
+});
+
+await test('a saved theme that makes no sense falls back to the default', async () => {
+  storage.clear();
+  storage.set(app('KEY_THEME'), JSON.stringify({ preset: 'neon', accent: 'red', bg: '#12345' }));
+  assert.deepEqual({ ...app('loadTheme')() }, { preset: 'default', accent: null, bg: null });
+  storage.set(app('KEY_THEME'), '{not json');
+  assert.equal(app('loadTheme')().preset, 'default');
+  storage.set(app('KEY_THEME'), JSON.stringify({ preset: 'pink', accent: '#ABCDEF', bg: '#000000' }));
+  assert.deepEqual({ ...app('loadTheme')() }, { preset: 'pink', accent: '#abcdef', bg: '#000000' });
+  storage.clear();
+});
+
 await test('an update check with no connection says so, and is not counted', async () => {
   // The service worker answers from its cache when offline and labels the
   // copy. Taken at face value it read as «Το πρόγραμμα είναι ενημερωμένο».

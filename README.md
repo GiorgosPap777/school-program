@@ -179,7 +179,7 @@ browser never fires `updatefound` for it a second time.
 ```
 index.html                app shell (Greek UI)
 app.css                   mobile-first styles, light + dark, safe-area aware
-app.js                    picker, merge, live highlighting, update checks
+app.js                    picker, merge, live highlighting, update checks, themes
 sw.js                     service worker — cache-first shell, network-first data
 manifest.webmanifest
 data/schedule.json        the only file that changes per revision
@@ -292,6 +292,45 @@ dropped from a saved selection the moment the student moves to another class. Th
 
 ---
 
+## Colour themes
+
+The palette button beside ⚙ opens «Εμφάνιση», and a tap repaints the whole app
+at once: bar, background, cards, borders, buttons, the «Επόμενο» tag, and the
+phone's status bar. There is no Save. The choice is kept per phone in
+`gel7.theme.v1`.
+
+| Theme | What it is |
+|---|---|
+| Προεπιλογή | The original blue. Follows the phone's light/dark mode. |
+| AMOLED | True black. The bar goes black too and the blue stays as the main colour. Always dark. |
+| Ροζ | Pink, with a light and a dark version. Follows the phone. |
+| Δικά σου | The student picks a **main colour** and a **background**, exactly: with the phone's colour picker, or by typing the hex. |
+
+Everything else in «Δικά σου» is worked out from those two in `customPalette()`.
+Text goes black or white, whichever reads, and every colour that carries text
+is pushed only as far as it needs to reach 4.5:1 against what it sits on.
+`app.test.mjs` checks that across 324 pairings, including the awkward ones (mid
+grey, a pink right on the black/white boundary, white on white). The amber of the
+running lesson and the red of a clash are signals, not decoration, so they stay
+amber and red in every theme.
+
+The presets are `[data-theme]` blocks in `app.css`. «Δικά σου» has no block:
+app.js writes its colours onto `<html>` directly. A small script in
+`index.html`'s `<head>` puts the saved theme back before the first paint;
+app.js only runs once the page has been parsed, which is late enough to flash
+the default blue on every launch. The phone's status bar is a `<meta>`, which
+CSS cannot reach, so each preset's `chrome` colours in `THEMES` (app.js) are
+kept in step with app.css by hand. The test fails if they drift.
+
+Adding a preset means: a `[data-theme="…"]` block in app.css (with a dark-mode
+one if it should follow the phone), an entry in `THEMES`, and its id in the
+`<head>` script's list. The tests catch a missing piece.
+
+The splash screen and Android's task-switcher colour come from
+`manifest.webmanifest`, which is static, so those stay blue whatever the theme.
+
+---
+
 ## Bandwidth
 
 Sized for a slow home uplink, because that is what this usually ships from.
@@ -341,8 +380,10 @@ python3 tools/test/schedule.test.py   # data invariants
 selection the picker can offer (196 today): no «Σύγκρουση», no lesson silently
 lost, split groups and τμήματα ένταξης behaving, Γυμναστική never given a room.
 Those are written as invariants over whatever `schedule.json` holds, so a new
-import does not need the test edited. The status-card and update-check cases
-run against a small hand-made timetable instead.
+import does not need the test edited. The status-card, today-tab and
+update-check cases run against a small hand-made timetable instead, and the
+theme cases check that custom colours stay readable and that app.js, app.css
+and index.html agree on which themes exist.
 
 `tools/test/make_fixtures.py` builds the schedule variants used to exercise the
 update path by hand (a newer revision, one that drops a track, one that introduces
@@ -375,6 +416,11 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
   `kontraByTrack` in `tools/aliases.json`, and the import fails if it points an
   orientation at a subject with no groups, or leaves a group no orientation can
   reach.
+- **After the last lesson, «Σήμερα» shows the next school day, and says so.**
+  The first tab reads «Αύριο · Πέμπτη» once today's lessons are over. If that
+  day is not tomorrow (Friday afternoon, the weekend), it reads just «Δευτέρα».
+  It goes back to «Σήμερα» at midnight. A tab that still said «Σήμερα» over
+  tomorrow's lessons made them look like today's.
 - **The week grid shows family names only.** A full «ΙΩΑΝΝΑ ΧΡΙΣΤΙΝΑΚΗ
   (ΥΠ/ΝΤΡΙΑ)» wraps a grid cell to four lines and pushes half the week off a
   phone screen. Greek names run given-name first, so the last word left after
