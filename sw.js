@@ -3,16 +3,20 @@
    Bump APP_VERSION whenever you change any shell file — the cache name derives
    from it, so a new version installs cleanly and the old one is swept away. */
 
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.10.1';
 const SHELL_CACHE = `gel7-shell-${APP_VERSION}`;
 const DATA_CACHE = 'gel7-data';
 const DATA_TIMEOUT_MS = 3000;
+// An update check (app.js adds ?check=1) is the student asking the network
+// itself, so it gets longer before the kept copy answers instead.
+const CHECK_TIMEOUT_MS = 10000;
+
+/* Without these the app cannot open offline at all, so they are all or
+   nothing: one that fails fails the install, and the browser tries again on a
+   later visit rather than activating a worker that cannot do its one job. */
+const CORE = ['./', 'index.html', 'app.css', 'app.js'];
 
 const SHELL = [
-  './',
-  'index.html',
-  'app.css',
-  'app.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',
@@ -29,7 +33,8 @@ self.addEventListener('install', (event) => {
     // moment ago on a first visit, the icons on every update — comes back as a
     // header-only 304. 'reload' downloaded all of it again: 82 KB for a first
     // install instead of ~40.
-    // One bad URL must not fail the whole install, so add them individually.
+    await cache.addAll(CORE.map((url) => new Request(url, { cache: 'no-cache' })));
+    // A missing icon must not fail the whole install, so add these one by one.
     await Promise.all(SHELL.map((url) =>
       cache.add(new Request(url, { cache: 'no-cache' })).catch(() => {})));
     // Seed the data cache so the very first offline open still has a timetable.
@@ -54,25 +59,32 @@ self.addEventListener('message', (event) => {
 
 /** Network first with a short timeout, falling back to the cached copy.
     Used for schedule data: fresh when there is signal, instant when there isn't. */
-async function networkFirst(request) {
-  const cache = await caches.open(DATA_CACHE);
-  try {
-    const response = await Promise.race([
-      // 'no-cache' revalidates but lets an unchanged file answer from the HTTP
-      // cache, so a repeat check transfers headers only.
-      fetch(request, { cache: 'no-cache' }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DATA_TIMEOUT_MS)),
-    ]);
-    if (response && response.ok) {
-      cache.put(request, response.clone());
-      return response;
-    }
-    throw new Error(`HTTP ${response && response.status}`);
-  } catch (err) {
-    const cached = await cache.match(request, { ignoreSearch: true });
-    if (cached) return labelledStale(cached);
-    throw err;
-  }
+function networkFirst(event) {
+  const url = new URL(event.request.url);
+  const check = url.searchParams.has('check');
+  // Fetched and kept without the marker, so a check and a first load share
+  // one copy here and one entry in the browser's HTTP cache.
+  url.searchParams.delete('check');
+  // 'no-cache' revalidates but lets an unchanged file answer from the HTTP
+  // cache, so a repeat check transfers headers only.
+  const network = fetch(url.href, { cache: 'no-cache' }).then((response) => {
+    if (!response || !response.ok) throw new Error(`HTTP ${response && response.status}`);
+    return { response, kept: caches.open(DATA_CACHE).then((c) => c.put(url.href, response.clone())) };
+  });
+  // The race below only decides what the page gets now. A copy that arrives
+  // after it still goes into the cache for the next open; throwing it away
+  // left a student on slow Wi-Fi on the old schedule however long they waited.
+  event.waitUntil(network.then((got) => got.kept).catch(() => {}));
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('timeout')), check ? CHECK_TIMEOUT_MS : DATA_TIMEOUT_MS));
+  return Promise.race([network, timeout])
+    .then((got) => got.response)
+    .catch(async (err) => {
+      const cache = await caches.open(DATA_CACHE);
+      const cached = await cache.match(url.href, { ignoreSearch: true });
+      if (cached) return labelledStale(cached);
+      throw err;
+    });
 }
 
 /** The cached copy, marked as one. Unmarked, a fallback is indistinguishable
@@ -106,7 +118,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (url.pathname.endsWith('.json') && !url.pathname.endsWith('manifest.webmanifest')) {
-    event.respondWith(networkFirst(request));
+    event.respondWith(networkFirst(event));
     return;
   }
 

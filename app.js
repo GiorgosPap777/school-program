@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.10.1';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -123,6 +123,11 @@ function validateSchedule(data) {
   if (data.schemaVersion !== SCHEMA_VERSION) {
     fail(`schemaVersion ${data.schemaVersion} αντί για ${SCHEMA_VERSION}`);
   }
+  // Both are how isNewer() orders two schedules. One without them was offered
+  // as «έκδοση undefined», and once taken, nothing published after it ever
+  // compared as newer again.
+  if (typeof data.version !== 'string' || !data.version.trim()) fail('λείπει η έκδοση');
+  if (isNaN(Date.parse(data.generatedAt))) fail('λείπει η ημερομηνία δημιουργίας');
   if (!Array.isArray(data.days) || !data.days.length) fail('λείπουν οι ημέρες');
   if (!Array.isArray(data.periods) || !data.periods.length) fail('λείπουν οι ώρες');
   for (const p of data.periods) {
@@ -155,8 +160,11 @@ function stamp(schedule) {
 function isNewer(candidate, current) {
   if (!current) return true;
   const a = Date.parse(candidate.generatedAt), b = Date.parse(current.generatedAt);
-  if (!isNaN(a) && !isNaN(b) && a !== b) return a > b;
-  return String(candidate.version) > String(current.version);
+  // A copy stored by an older version may have no date. The dated one is the
+  // way out of it, never the other way round.
+  if (isNaN(a) !== isNaN(b)) return !isNaN(a);
+  if (!isNaN(a) && a !== b) return a > b;
+  return String(candidate.version || '') > String(current.version || '');
 }
 
 /** Errors carry `kind` so callers can tell "you're offline" from "the file the
@@ -171,12 +179,15 @@ function tagged(kind, message) {
     when the network is down, which is right for a first load and no answer at
     all to «is there anything newer?». */
 async function fetchSchedule(url, { fresh = false } = {}) {
+  // Marked, so the service worker gives the network longer before answering
+  // from its cache: the student is waiting on a real answer. See sw.js.
+  const target = fresh ? `${url}${url.includes('?') ? '&' : '?'}check=1` : url;
   let res;
   try {
     // 'no-cache' still revalidates on every call, but sends If-None-Match, so an
     // unchanged schedule comes back as a 304 with no body instead of ~7 KB.
     // 'no-store' would skip the validator entirely and re-download every time.
-    res = await fetch(url, { cache: 'no-cache' });
+    res = await fetch(target, { cache: 'no-cache' });
   } catch (err) {
     throw tagged('network', err.message);
   }
@@ -212,7 +223,21 @@ async function loadInitialSchedule() {
     localStorage.removeItem(KEY_SCHEDULE);
   }
 
-  const bundled = await fetchSchedule(BUNDLED_SCHEDULE_URL);
+  let bundled;
+  try {
+    bundled = await fetchSchedule(BUNDLED_SCHEDULE_URL);
+  } catch (err) {
+    // An older version could find a schedule with nothing loaded yet, keep it
+    // as pending and fail before ever showing it. It is as good as any.
+    try {
+      const pending = validateSchedule(load(KEY_PENDING, null));
+      localStorage.removeItem(KEY_PENDING);
+      save(KEY_SCHEDULE, pending);
+      return { schedule: pending, fetchedRemote: false };
+    } catch (none) {
+      throw err;
+    }
+  }
   save(KEY_SCHEDULE, bundled);
   return {
     schedule: bundled,
@@ -297,7 +322,45 @@ function buildGrid(schedule, selection) {
       }
     }
   }
+
+  // An orientation or κόντρα the student has not picked still takes its hours.
+  // Left empty they read «Κενό», free, to someone who is expected in a
+  // classroom. Say what the hour is, and that the group is what's missing.
+  for (const hour of unpickedHours(schedule, selection)) {
+    const row = grid[hour.d];
+    if (row && hour.p >= 1 && hour.p <= schedule.periods.length && !row[hour.p - 1]) {
+      row[hour.p - 1] = hour;
+    }
+  }
   return { grid, conflicts };
+}
+
+/** The hours of the orientation groups, or of the «κόντρα», when the student
+    has not picked one. Every group of that kind in a grade meets at the same
+    hours, so which hours they are is known even though room and teacher are not.
+    The κόντρα subject is known too once the orientation is, from
+    `kontraByTrack`. */
+function unpickedHours(schedule, selection) {
+  if (!selection || !selection.grade) return [];
+  const mine = Object.values(schedule.groups)
+    .filter((g) => g.grade === selection.grade && !g.hidden);
+  const hours = [];
+  const add = (groups, subject) => {
+    for (const g of groups) {
+      for (const l of g.lessons) hours.push({ d: l.d, p: l.p, subject, unpicked: true });
+    }
+  };
+  if (!selection.track) add(mine.filter((g) => g.kind === 'track'), 'Ώρα κατεύθυνσης');
+  if (!selection.kontra) {
+    const track = selection.track && schedule.groups[selection.track];
+    const wanted = track && (schedule.kontraByTrack || {})[track.track];
+    const kontra = mine.filter((g) => g.kind === 'kontra');
+    const theirs = kontra.filter((g) => g.track === wanted);
+    // Same fallback as the picker: a mapping that matches nothing means every group.
+    if (theirs.length) add(theirs, wanted);
+    else add(kontra, 'Μάθημα επιλογής (Κόντρα)');
+  }
+  return hours;
 }
 
 /** Everyone in the room for a lesson: the class's own teacher first, then
@@ -579,6 +642,12 @@ function renderDayList(target, dayIdx, status, withHeading) {
         + ` — το ${esc(state.schedule.groups[lesson.group].parent)} δεν έχει άλλο μάθημα</p>`;
     }
 
+    // The hour is theirs; which room and teacher depends on a group they have
+    // not picked yet.
+    if (lesson && lesson.unpicked) {
+      instead += '<p class="slot__instead">δεν έχεις διαλέξει ομάδα</p>';
+    }
+
     const li = document.createElement('li');
     li.className = classes.join(' ');
     li.innerHTML = `
@@ -800,6 +869,7 @@ function onlyKontra(map, trackId) {
 }
 
 function openPicker() {
+  if (!state.schedule) return;   // nothing to pick from until one has loaded
   state.draft = state.selection
     ? { ...state.selection, extras: [...(state.selection.extras || [])] }
     : { grade: null, section: null, track: null, kontra: null, extras: [] };
@@ -1004,21 +1074,28 @@ function readable(colour, toward, against, min) {
     from them, and every colour that carries text is checked against what it
     sits on. A pale yellow main colour must not leave white letters on the
     buttons, and lessons on a mid-grey background still have to be readable. */
-function customPalette(accent, bg) {
+function customPalette(picked, bg) {
   const dark = contrast(bg, '#ffffff') > contrast(bg, '#000000');
   const ink = dark ? '#ffffff' : '#000000';
+  const blackOrWhite = (c) => (contrast(c, '#ffffff') >= contrast(c, '#000000') ? '#ffffff' : '#000000');
   // Anything text sits on keeps its distance from the text colour. A pink in
   // the middle of the range barely takes white text as it is, and cards a
   // shade lighter than it — as cards are in a dark theme — would not at all.
   const under = (c) => readable(c, dark ? '#000000' : '#ffffff', ink, 5.5);
   const surface = under(mix(bg, '#ffffff', dark ? 0.05 : 0.7));
+  // A selected chip, the day being shown and the «Επόμενο» border are drawn in
+  // the main colour and nothing else. Picked close to the background, it left
+  // the student unable to see what they had chosen, so there it moves toward
+  // the text colour until it stands out at 3:1, WCAG's minimum for anything
+  // that is not text. The bar keeps the colour exactly as picked.
+  const accent = readable(picked, ink, [bg, surface], 3);
   const surface2 = under(mix(mix(bg, ink, dark ? 0.09 : 0.04), accent, 0.05));
   const accentSoft = under(mix(surface, accent, dark ? 0.2 : 0.13));
   const nowBg = under(mix(surface, '#f59e0b', dark ? 0.16 : 0.12));
   const warnBg = under(mix(surface, '#ef4444', dark ? 0.14 : 0.09));
   const text = readable(mix(ink, bg, 0.1), ink, [bg, surface, surface2, accentSoft, nowBg, warnBg], 7);
   return {
-    chrome: dark ? bg : accent,
+    chrome: dark ? bg : picked,
     vars: {
       'color-scheme': dark ? 'dark' : 'light',
       '--bg': bg,
@@ -1028,13 +1105,19 @@ function customPalette(accent, bg) {
       '--muted': readable(mix(text, bg, 0.42), text, [bg, surface, surface2], 4.5),
       '--border': mix(mix(bg, ink, dark ? 0.15 : 0.11), accent, 0.06),
       '--accent': accent,
-      '--accent-text': contrast(accent, '#ffffff') >= contrast(accent, '#000000') ? '#ffffff' : '#000000',
+      '--accent-text': blackOrWhite(accent),
       '--accent-soft': accentSoft,
       '--accent-ink': readable(accent, text, accentSoft, 4.5),
       '--now': readable(dark ? '#fcd34d' : '#b45309', text, nowBg, 4.5),
       '--now-bg': nowBg,
       '--warn': readable(dark ? '#ff9d94' : '#b42318', text, warnBg, 4.5),
       '--warn-bg': warnBg,
+      '--bar': picked,
+      '--bar-text': blackOrWhite(picked),
+      // An installed iPhone app gets its clock and battery drawn in white over
+      // the top of the bar, which a pale bar swallows. The strip under them is
+      // the bar's colour darkened until white reads on it.
+      '--status-strip': readable(picked, '#000000', '#ffffff', 4.5),
       '--shadow': dark
         ? '0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .35)'
         : '0 1px 2px rgba(16, 24, 40, .06), 0 8px 24px rgba(16, 24, 40, .06)',
@@ -1221,6 +1304,9 @@ function banner({ id, text, actionText, onAction, tone }) {
 let checking = false;
 
 async function checkForUpdate({ silent, throttled = silent }) {
+  // With nothing loaded there is nothing to compare against: whatever arrives
+  // is the schedule, and start() is what takes it.
+  if (!state.schedule) return start();
   if (checking) return;
   if (throttled) {
     const last = Number(load(KEY_LAST_CHECK, 0)) || 0;
@@ -1399,6 +1485,7 @@ function startTicking() {
 /* ------------------------------------------------------------------- wiring */
 
 function setView(view) {
+  if (!state.schedule) return;   // the load error stands in for both views
   state.view = view;
   $('view-today').hidden = view !== 'today';
   $('view-week').hidden = view !== 'week';
@@ -1442,6 +1529,8 @@ function wire() {
   });
 
   $('checkBtn').addEventListener('click', () => checkForUpdate({ silent: false }));
+  $('retryBtn').addEventListener('click', start);
+  window.addEventListener('online', start);
 
   // iOS suspends timers while the app is backgrounded, so the highlight would be
   // stale at exactly the moment a student reopens it. Recompute on every return.
@@ -1480,17 +1569,30 @@ async function boot() {
   wire();
   setupInstall();
   registerServiceWorker();
+  await start();
+}
 
+let starting = false;
+
+/** Everything that needs a schedule. A first visit with no connection has
+    none yet, and gets another go — from the button, when the phone comes back
+    online, or when the app is opened again — instead of an error until it is
+    reinstalled. */
+async function start() {
+  if (starting || state.schedule) return;
+  starting = true;
   let fetchedRemote = false;
   try {
     const initial = await loadInitialSchedule();
     state.schedule = initial.schedule;
     fetchedRemote = initial.fetchedRemote;
   } catch (err) {
-    $('main').innerHTML =
-      `<p class="empty">Δεν ήταν δυνατή η φόρτωση του προγράμματος.<br>${esc(err.message)}</p>`;
+    showLoadError(err);
     return;
+  } finally {
+    starting = false;
   }
+  $('loadError').hidden = true;
 
   state.selection = pruneSelection(load(KEY_SELECTION, null), state.schedule);
 
@@ -1509,6 +1611,17 @@ async function boot() {
   // version, one that did not keep the schedule it found, may have been asked
   // for before its «Νέο πρόγραμμα» banner was tapped.
   if (!fetchedRemote) checkForUpdate({ silent: true, throttled: false });
+}
+
+/** The views stay where they are, empty, so the moment a schedule arrives
+    start() has somewhere to draw it. */
+function showLoadError(err) {
+  $('view-today').hidden = true;
+  $('view-week').hidden = true;
+  $('loadErrorText').textContent = err && err.kind === 'data'
+    ? 'Δεν ήταν δυνατή η φόρτωση του προγράμματος: το αρχείο του σχολείου δεν είναι έγκυρο.'
+    : 'Δεν ήταν δυνατή η φόρτωση του προγράμματος. Έλεγξε τη σύνδεσή σου και δοκίμασε ξανά.';
+  $('loadError').hidden = false;
 }
 
 boot();

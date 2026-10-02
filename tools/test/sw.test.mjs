@@ -24,6 +24,12 @@ class MockCache {
     if (!res.ok) throw new Error('add failed');
     this.store.set(this.key(req), res);
   }
+  // All or nothing, like the real one.
+  async addAll(reqs) {
+    const responses = await Promise.all(reqs.map((req) => mockFetch(req)));
+    if (responses.some((res) => !res.ok)) throw new TypeError('addAll failed');
+    reqs.forEach((req, i) => this.store.set(this.key(req), responses[i]));
+  }
   // A real Cache hands out a fresh Response every time, so its body can be
   // read again by the next test.
   async match(req) {
@@ -57,6 +63,7 @@ async function mockFetch(req) {
   const url = new URL(typeof req === 'string' ? req : req.url, ORIGIN);
   if (!network.online) throw new TypeError('Failed to fetch');
   if (network.delayMs) await new Promise((r) => setTimeout(r, network.delayMs));
+  if (network.missing && network.missing.has(url.pathname)) return new Response('', { status: 404 });
   return new Response(network.body, { status: 200 });
 }
 
@@ -92,6 +99,11 @@ vm.runInContext(readFileSync(resolve(root, 'sw.js'), 'utf8'), sandbox, { filenam
 
 /* ------------------------------------------------------------------- helpers */
 
+/* Everything handed to waitUntil so far. A browser gives the page its
+   response without waiting for those, and so does dispatch; a test that needs
+   the worker to have finished awaits this. */
+let inFlight = Promise.resolve();
+
 async function dispatch(type, event) {
   const waits = [];
   const respondsWith = [];
@@ -101,8 +113,11 @@ async function dispatch(type, event) {
     respondWith: (p) => respondsWith.push(p),
   };
   for (const fn of listeners.get(type) || []) await fn(ev);
-  await Promise.all(waits);
-  return respondsWith.length ? respondsWith[0] : undefined;
+  const settled = Promise.all(waits);
+  inFlight = Promise.all([inFlight, settled.catch(() => {})]);
+  if (respondsWith.length) return respondsWith[0];
+  await settled;
+  return undefined;
 }
 
 const request = (path, extra = {}) =>
@@ -144,6 +159,35 @@ await test('install precaches the shell and seeds the schedule', async () => {
   assert.ok(await data.match('/data/schedule.json'), 'schedule seeded for first offline open');
 });
 
+await test('install fails, to be retried, when a core file cannot be fetched', async () => {
+  // Activating anyway left a worker that claimed the page and then could not
+  // open it offline: index.html or app.js simply was not there.
+  const kept = sandbox.caches;
+  sandbox.caches = new MockCacheStorage();
+  network = { online: true, delayMs: 0, body: 'x', missing: new Set(['/app.js']) };
+  try {
+    await assert.rejects(dispatch('install', {}));
+  } finally {
+    sandbox.caches = kept;
+  }
+});
+
+await test('a missing icon does not fail the install', async () => {
+  const kept = sandbox.caches;
+  sandbox.caches = new MockCacheStorage();
+  network = { online: true, delayMs: 0, body: 'x', missing: new Set(['/icons/icon-512.png']) };
+  try {
+    await dispatch('install', {});
+    const names = await sandbox.caches.keys();
+    const shell = await sandbox.caches.open(names.find((n) => n.startsWith('gel7-shell-')));
+    assert.ok(await shell.match('/app.js'), 'the core files are in');
+    assert.ok(!(await shell.match('/icons/icon-512.png')), 'and the missing icon is not');
+  } finally {
+    sandbox.caches = kept;
+    network = { online: true, delayMs: 0, body: 'v1' };
+  }
+});
+
 await test('activate sweeps caches from older app versions', async () => {
   await sandbox.caches.open('gel7-shell-0.0.1');   // a stale build
   await dispatch('activate', {});
@@ -183,6 +227,34 @@ await test('a slow network does not stall the schedule fetch', async () => {
   const elapsed = Date.now() - started;
   assert.equal(body, 'v2', 'times out to the cached copy');
   assert.ok(elapsed < 4000, `fell back after ${elapsed}ms, not the full 5s`);
+});
+
+await test('a copy that arrives after the timeout is still kept', async () => {
+  // The page has had the kept copy by then. Dropping the late one meant the
+  // next open had to be lucky with the network all over again.
+  await inFlight;
+  network = { online: true, delayMs: 4000, body: 'late' };
+  const res = await dispatch('fetch', { request: request('/data/schedule.json') });
+  assert.equal(res.headers.get('X-Served-From'), 'cache', 'the page was answered in time');
+  await inFlight;
+  const data = await sandbox.caches.open('gel7-data');
+  assert.equal(await (await data.match('/data/schedule.json')).text(), 'late');
+});
+
+await test('an update check waits out a slow network', async () => {
+  // Answered from the cache at 3 s, a student on slow school Wi-Fi was told
+  // «δεν υπάρχει σύνδεση» and never saw the new schedule.
+  network = { online: true, delayMs: 4000, body: 'checked' };
+  const res = await dispatch('fetch', { request: request('/data/schedule.json?check=1') });
+  assert.equal(res.headers.get('X-Served-From'), null, 'a real answer');
+  assert.equal(await res.text(), 'checked');
+  await inFlight;
+});
+
+await test('an update check with no signal still says it came from the cache', async () => {
+  network = { online: false, delayMs: 0, body: 'unused' };
+  const res = await dispatch('fetch', { request: request('/data/schedule.json?check=1') });
+  assert.equal(res.headers.get('X-Served-From'), 'cache');
 });
 
 await test('shell assets are served from cache while offline', async () => {

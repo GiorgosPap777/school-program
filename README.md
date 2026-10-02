@@ -33,6 +33,13 @@ Or `docker compose up -d` with the bundled `docker-compose.yml`. The image is
 nginx plus the static app, and already sends the cache headers described below —
 your outer proxy only has to avoid overriding them.
 
+It also sends a Content-Security-Policy that allows nothing but this site, plus
+the one inline script in `index.html`'s `<head>` by its hash. Change that
+script and the hash in `docker/default.conf` has to change with it;
+`app.test.mjs` fails and prints the new one until it does. A path that is not a
+file is a 404 rather than `index.html`, so a misnamed `schedule.json` fails as
+missing instead of as «not valid JSON».
+
 The schedule is baked in at build time. To publish a new one without rebuilding,
 mount over it:
 
@@ -85,7 +92,7 @@ location = /programma { return 301 /programma/; }
 
 location /programma/ {
     alias /srv/programma/;
-    try_files $uri $uri/ /programma/index.html;
+    try_files $uri $uri/ =404;
 
     location ~ ^/programma/(sw\.js|index\.html)$ {
         add_header Cache-Control "no-cache";
@@ -163,7 +170,19 @@ const REMOTE_SCHEDULE_URL = 'https://raw.githubusercontent.com/<user>/<repo>/mai
 The app then compares that file's `version` / `generatedAt` against what it has
 cached, and shows a «Νέο πρόγραμμα» banner when something newer appears. The
 student taps to apply it — the timetable never changes underneath them mid-look.
-A payload that fails validation is refused and the last good schedule is kept.
+A payload that fails validation is refused and the last good schedule is kept;
+one without a `version` or a `generatedAt` counts as failing, since those two
+are how the next one is recognised as newer. Another host also has to be
+added to the Content-Security-Policy as `connect-src` (see *Docker*).
+
+An update check is marked `?check=1`. The service worker gives it 10 s on the
+network before answering from its cache, where a first load gets 3 s: the
+student asked for a real answer. A copy that arrives after either timeout
+still goes into the cache for the next open.
+
+If the very first load fails (a first visit with no signal), the app says so
+in Greek with a «Δοκίμασε ξανά» button, and tries again by itself when the phone
+comes back online or the app is reopened.
 
 Both update banners — «Νέο πρόγραμμα» and «Νέα έκδοση της εφαρμογής» — come
 back on every open until tapped. The downloaded schedule is kept aside
@@ -259,6 +278,13 @@ track to fill (Β' leaves period 3; Γ' leaves 2–5). Merging is therefore a un
 the selected groups' lessons. Where two selected groups do claim the same slot, the
 app keeps **both** and marks the slot «Σύγκρουση» rather than silently dropping one.
 
+Saving without an orientation group, or without a κόντρα, is allowed. Those
+hours are not shown as «Κενό», though: every group of that kind in a grade meets
+at the same hours, so the app fills them with «Ώρα κατεύθυνσης» (or the κόντρα
+subject, «Ιστορία (Κόντρα)», when the orientation says which) and «δεν έχεις
+διαλέξει ομάδα». «Κενό · Τώρα» through an orientation hour could send a student
+home.
+
 Two kinds of group are exceptions, and both hang off `parent`.
 
 A **split group** (`"parallel": true`) really does take students out of the room:
@@ -309,10 +335,19 @@ phone's status bar. There is no Save. The choice is kept per phone in
 Everything else in «Δικά σου» is worked out from those two in `customPalette()`.
 Text goes black or white, whichever reads, and every colour that carries text
 is pushed only as far as it needs to reach 4.5:1 against what it sits on.
-`app.test.mjs` checks that across 324 pairings, including the awkward ones (mid
-grey, a pink right on the black/white boundary, white on white). The amber of the
-running lesson and the red of a clash are signals, not decoration, so they stay
-amber and red in every theme.
+Selected chips, the day being shown and the «Επόμενο» border are drawn in the
+main colour alone, so where it sits too close to the background they get it
+moved toward the text colour until it stands out at 3:1; the bar keeps the
+colour exactly as picked. `app.test.mjs` checks all of that across 324
+pairings, including the awkward ones (mid grey, a pink right on the
+black/white boundary, white on white). The amber of the running lesson and the
+red of a clash are signals, not decoration, so they stay amber and red in
+every theme.
+
+An installed iPhone app draws its clock and battery in white over the top of
+the bar. Where the bar is too pale for that (the default and pink dark modes,
+and any pale «Δικά σου»), the strip under them is the bar's colour darkened
+until white reads on it, `--status-strip`. Elsewhere that strip has no height.
 
 The presets are `[data-theme]` blocks in `app.css`. «Δικά σου» has no block:
 app.js writes its colours onto `<html>` directly. A small script in
@@ -380,10 +415,12 @@ python3 tools/test/schedule.test.py   # data invariants
 selection the picker can offer (196 today): no «Σύγκρουση», no lesson silently
 lost, split groups and τμήματα ένταξης behaving, Γυμναστική never given a room.
 Those are written as invariants over whatever `schedule.json` holds, so a new
-import does not need the test edited. The status-card, today-tab and
-update-check cases run against a small hand-made timetable instead, and the
-theme cases check that custom colours stay readable and that app.js, app.css
-and index.html agree on which themes exist.
+import does not need the test edited; that includes «no orientation or κόντρα
+hour reads as free before its group is picked». The status-card, today-tab,
+first-load and update-check cases run against a small hand-made timetable
+instead. The theme cases check that custom colours and every preset stay
+readable, and that app.js, app.css and index.html agree on which themes exist.
+One more checks the `<head>` script's hash against the one `docker/default.conf` allows.
 
 `tools/test/make_fixtures.py` builds the schedule variants used to exercise the
 update path by hand (a newer revision, one that drops a track, one that introduces

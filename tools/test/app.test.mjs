@@ -11,6 +11,7 @@
    not as «Α2 has Γαλλικά on Wednesday», so a new PDF import does not break it.
 */
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import vm from 'node:vm';
@@ -26,7 +27,7 @@ function element() {
   return {
     innerHTML: '', className: '', textContent: '', hidden: false, disabled: false,
     style: {}, dataset: {}, children: [],
-    setAttribute() {}, addEventListener() {}, remove() {},
+    setAttribute() {}, addEventListener() {}, remove() {}, showModal() {}, close() {},
     insertAdjacentHTML() {},
     appendChild(child) { this.children.push(child); return child; },
     querySelector: () => null, querySelectorAll: () => [],
@@ -214,7 +215,8 @@ await test('a lesson held outside names no room; every classroom lesson names on
   for (const sel of selections) {
     for (const row of buildGrid(SCHEDULE, sel).grid) {
       for (const l of row) {
-        if (!l) continue;
+        // An hour of an orientation or κόντρα not picked yet: no group, no room.
+        if (!l || l.unpicked) continue;
         const room = lessonRoom(l);
         if (outside.has(l.subject)) {
           assert.equal(room, '', `${describe(sel)}: ${l.subject} sent to ${room}`);
@@ -226,6 +228,36 @@ await test('a lesson held outside names no room; every classroom lesson names on
       }
     }
   }
+});
+
+await test('an orientation or κόντρα hour never reads as free before its group is picked', async () => {
+  // A Β′ student who saved without an orientation was told «Κενό · Τώρα»
+  // through every orientation hour, and could have walked out of school.
+  const buildGrid = app('buildGrid');
+  state.schedule = SCHEDULE;
+  const busy = (sel) => buildGrid(SCHEDULE, sel).grid.map((row) => row.map(Boolean));
+  const sameClass = new Map();
+  for (const sel of selections) {
+    const key = `${sel.section}|${sel.extras.join(',')}`;
+    if (!sameClass.has(key)) sameClass.set(key, []);
+    sameClass.get(key).push(sel);
+  }
+  let compared = 0;
+  for (const group of sameClass.values()) {
+    for (const partial of group.filter((sel) => !sel.track || !sel.kontra)) {
+      const shown = busy(partial);
+      for (const full of group) {
+        if (partial.track && full.track !== partial.track) continue;
+        if (partial.kontra && full.kontra !== partial.kontra) continue;
+        busy(full).forEach((row, d) => row.forEach((taken, p) => {
+          assert.ok(!taken || shown[d][p], `${describe(partial)} shows ${SCHEDULE.days[d]} `
+            + `${p + 1}η as free, but ${describe(full)} has a lesson then`);
+        }));
+        compared++;
+      }
+    }
+  }
+  assert.ok(compared > 0, 'no selection without an orientation or κόντρα to compare');
 });
 
 /* A hand-made week, so the clock tests do not depend on any real class.
@@ -266,6 +298,111 @@ await test('status card: the right headline at each point of the day', async () 
   }
 });
 
+await test('an hour of a group not picked yet says what it is', async () => {
+  // TINY plus one orientation (Monday 3rd) and one κόντρα (Tuesday 2nd).
+  const ORIENTED = {
+    ...TINY,
+    kontraByTrack: { Θετικών: 'Ιστορία (Κόντρα)' },
+    groups: {
+      ...TINY.groups,
+      Χθ: { label: 'Χθ', grade: 'Α', kind: 'track', track: 'Θετικών', room: 'Αίθ. 2',
+        lessons: [{ d: 0, p: 3, subject: 'Φυσική Π' }] },
+      Χιστ: { label: 'Χιστ', grade: 'Α', kind: 'kontra', track: 'Ιστορία (Κόντρα)', room: 'Αίθ. 3',
+        lessons: [{ d: 1, p: 2, subject: 'Ιστορία' }] },
+    },
+  };
+  const pick = (track, kontra) => ({ grade: 'Α', section: 'Χ1', track, kontra, extras: [] });
+  const cases = [
+    [pick(null, null), '2026-10-05T10:00', 'Ώρα κατεύθυνσης'],
+    [pick('Χθ', null), '2026-10-05T10:00', 'Φυσική Π'],
+    // Which κόντρα subject is known from the orientation; without one it is not.
+    [pick('Χθ', null), '2026-10-06T09:10', 'Ιστορία (Κόντρα)'],
+    [pick(null, null), '2026-10-06T09:10', 'Μάθημα επιλογής (Κόντρα)'],
+    [pick('Χθ', 'Χιστ'), '2026-10-06T09:10', 'Ιστορία'],
+  ];
+  for (const [sel, iso, want] of cases) {
+    assert.equal(headline(ORIENTED, sel, iso), want, `${describe(sel)} at ${iso}`);
+  }
+  // And the row in the list says what is missing.
+  const list = document.getElementById('todayList');
+  list.children.length = 0;
+  state.grid = app('buildGrid')(ORIENTED, pick(null, null)).grid;
+  const status = app('clockStatus')(ORIENTED, new Date('2026-10-05T10:00'));
+  app('renderDayList')(list, 0, status, false);
+  const row = list.children.find((li) => li.innerHTML.includes('Ώρα κατεύθυνσης'));
+  assert.ok(row, 'no «Ώρα κατεύθυνσης» row');
+  assert.ok(row.innerHTML.includes('δεν έχεις διαλέξει ομάδα'), 'the row does not say why');
+});
+
+await test('a schedule with no version or date is refused, and cannot strand anyone', async () => {
+  // One like that was offered as «έκδοση undefined», and once taken, no
+  // schedule published after it ever compared as newer.
+  const validate = app('validateSchedule');
+  const isNewer = app('isNewer');
+  for (const field of ['version', 'generatedAt']) {
+    const broken = JSON.parse(SCHEDULE_TEXT);
+    delete broken[field];
+    assert.throws(() => validate(broken), /Μη έγκυρο/, `accepted with no ${field}`);
+  }
+  const real = JSON.parse(SCHEDULE_TEXT);
+  const unstamped = JSON.parse(SCHEDULE_TEXT);
+  delete unstamped.version;
+  delete unstamped.generatedAt;
+  assert.equal(isNewer(real, unstamped), true, 'a real schedule must replace an unstamped one');
+  assert.equal(isNewer(unstamped, real), false, 'an unstamped one must never replace a real one');
+  // Through the real update check, it is a broken file, not a new schedule.
+  state.schedule = real;
+  sandbox.fetch = async () => new Response(JSON.stringify(unstamped), { status: 200 });
+  storage.clear();
+  const shown = document.getElementById('banners').children;
+  shown.length = 0;
+  await app('checkForUpdate')({ silent: true });
+  assert.deepEqual(shown.map((b) => b.dataset.banner), ['baddata']);
+});
+
+await test('a first load with no connection can be retried, and nothing breaks meanwhile', async () => {
+  // It used to replace both views with an English «Failed to fetch»; ⚙ and
+  // «Εβδομάδα» then threw, and a later check called a good schedule «no connection».
+  storage.clear();
+  state.schedule = null;
+  state.selection = null;
+  sandbox.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  await app('start')();
+  assert.equal(document.getElementById('loadError').hidden, false, 'no error shown');
+  assert.doesNotMatch(document.getElementById('loadErrorText').textContent, /Failed/);
+  app('openPicker')();
+  app('setView')('week');
+  sandbox.fetch = async () => new Response(SCHEDULE_TEXT, { status: 200 });
+  await app('checkForUpdate')({ silent: false });
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  assert.equal(state.schedule && state.schedule.version, SCHEDULE.version, 'still no schedule');
+  assert.equal(document.getElementById('loadError').hidden, true, 'the error stayed up');
+  assert.equal(document.getElementById('view-today').hidden, false, 'the today view stayed hidden');
+});
+
+await test('a schedule an older version kept but never showed is used when offline', async () => {
+  storage.clear();
+  storage.set(app('KEY_PENDING'), SCHEDULE_TEXT);
+  state.schedule = null;
+  state.selection = null;
+  sandbox.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  await app('start')();
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  assert.equal(state.schedule && state.schedule.version, SCHEDULE.version);
+  assert.equal(storage.has(app('KEY_PENDING')), false, 'and is no longer pending');
+});
+
+await test('an update check is marked for the service worker; a first load is not', async () => {
+  const asked = [];
+  sandbox.fetch = async (url) => {
+    asked.push(String(url));
+    return new Response(SCHEDULE_TEXT, { status: 200 });
+  };
+  await app('fetchSchedule')('data/schedule.json');
+  await app('fetchSchedule')('data/schedule.json', { fresh: true });
+  assert.deepEqual(asked, ['data/schedule.json', 'data/schedule.json?check=1']);
+});
+
 await test('the today tab names the day it shows once today is over', async () => {
   const label = (iso) => {
     state.schedule = TINY;
@@ -287,7 +424,7 @@ await test('the today tab names the day it shows once today is over', async () =
   for (const [iso, want] of cases) assert.equal(label(iso), want, `at ${iso}`);
 });
 
-await test('custom colours always leave text readable', async () => {
+await test('custom colours always leave text and selections readable', async () => {
   const customPalette = app('customPalette');
   const contrast = app('contrast');
   // Every pairing a student could plausibly pick, and the ones that are hard:
@@ -308,7 +445,15 @@ await test('custom colours always leave text readable', async () => {
         ['«Επόμενο» tag', v['--accent-ink'], v['--accent-soft'], 4.5],
         ['running lesson', v['--now'], v['--now-bg'], 4.5],
         ['warning', v['--warn'], v['--warn-bg'], 4.5],
+        // Drawn in the main colour alone, so it must stand out from what is
+        // around it: WCAG's 3:1 for anything that is not text.
+        ['selected chip on a card', v['--accent'], v['--surface'], 3],
+        ['selected chip on the page', v['--accent'], v['--bg'], 3],
+        ['bar text', v['--bar-text'], v['--bar'], 4.5],
+        // An installed iPhone app draws its clock in white over the bar.
+        ['iPhone clock', '#ffffff', v['--status-strip'], 4.5],
       ];
+      if (v['--bar'] !== accent) bad.push(`${accent} on ${bg}: the bar is ${v['--bar']}, not as picked`);
       for (const [what, fg, back, min] of pairs) {
         const ratio = contrast(fg, back);
         if (ratio < min) bad.push(`${accent} on ${bg}: ${what} ${fg}/${back} is ${ratio.toFixed(2)}:1`);
@@ -333,6 +478,36 @@ await test('every theme app.js offers is one index.html and app.css know', async
     if (t.id !== 'default') assert.ok(css.includes(`[data-theme="${t.id}"]`), `app.css has no ${t.id}`);
     for (const c of t.chrome) assert.ok(css.includes(c), `${t.id}'s status bar ${c} is in no theme`);
   }
+});
+
+await test('every preset keeps selections visible and the iPhone clock readable', async () => {
+  const css = readFileSync(resolve(root, 'app.css'), 'utf8');
+  const contrast = app('contrast');
+  const blocks = (selector) => [...css.matchAll(new RegExp(`${selector} \\{([^}]*)\\}`, 'g'))]
+    .map((m) => Object.fromEntries([...m[1].matchAll(/(--[\w-]+):\s*(#[0-9a-f]{6})\b/gi)]
+      .map(([, name, value]) => [name, value.toLowerCase()])));
+  const [defaultLight, defaultDark] = blocks(':root, \\[data-theme="default"\\]');
+  const [amoled] = blocks('\\[data-theme="amoled"\\]');
+  const [pinkLight, pinkDark] = blocks('\\[data-theme="pink"\\]');
+  const presets = { defaultLight, defaultDark, amoled, pinkLight, pinkDark };
+  for (const [name, v] of Object.entries(presets)) {
+    assert.ok(v && v['--accent'], `${name}: block not found in app.css`);
+    const strip = v['--status-strip'] || v['--bar'] || v['--accent'];
+    assert.ok(contrast('#ffffff', strip) >= 4.5, `${name}: white clock on ${strip}`);
+    for (const back of ['--bg', '--surface']) {
+      assert.ok(contrast(v['--accent'], v[back]) >= 3, `${name}: ${v['--accent']} on ${back} ${v[back]}`);
+    }
+  }
+});
+
+await test('the security policy allows exactly the script index.html runs inline', async () => {
+  const html = readFileSync(resolve(root, 'index.html'), 'utf8');
+  const conf = readFileSync(resolve(root, 'docker/default.conf'), 'utf8');
+  const inline = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  assert.equal(inline.length, 1, 'expected one inline script, the theme replay');
+  const hash = createHash('sha256').update(inline[0], 'utf8').digest('base64');
+  assert.ok(conf.includes(`'sha256-${hash}'`),
+    `the <head> script changed: docker/default.conf needs 'sha256-${hash}' in script-src`);
 });
 
 await test('a saved theme that makes no sense falls back to the default', async () => {
