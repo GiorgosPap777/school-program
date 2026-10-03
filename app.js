@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.10.2';
+const APP_VERSION = '1.10.3';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -1303,11 +1303,21 @@ function banner({ id, text, actionText, onAction, tone }) {
 
 let checking = false;
 
+function dropBanners(...ids) {
+  for (const id of ids) {
+    const el = document.querySelector(`[data-banner="${id}"]`);
+    if (el) el.remove();
+  }
+}
+
 async function checkForUpdate({ silent, throttled = silent }) {
   // With nothing loaded there is nothing to compare against: whatever arrives
   // is the schedule, and start() is what takes it.
   if (!state.schedule) return start();
   if (checking) return;
+  // A check the student asked for that found no signal is still waiting on its
+  // answer, so whichever check runs next gives one, throttle or not.
+  if (document.querySelector('[data-banner="nocheck"]')) silent = throttled = false;
   if (throttled) {
     const last = Number(load(KEY_LAST_CHECK, 0)) || 0;
     if (Date.now() - last < CHECK_INTERVAL_MS) return;
@@ -1316,6 +1326,9 @@ async function checkForUpdate({ silent, throttled = silent }) {
   try {
     const candidate = await fetchSchedule(REMOTE_SCHEDULE_URL, { fresh: true });
     save(KEY_LAST_CHECK, Date.now());
+    // Each answer replaces the last. «Δεν υπάρχει σύνδεση» stayed up beside
+    // the «Νέο πρόγραμμα» found once the phone was back online.
+    dropBanners('nocheck', 'uptodate', 'baddata');
     if (!isNewer(candidate, state.schedule)) {
       if (!silent) banner({ id: 'uptodate', text: 'Το πρόγραμμα είναι ενημερωμένο.' });
       return;
@@ -1327,6 +1340,7 @@ async function checkForUpdate({ silent, throttled = silent }) {
     if (err.kind === 'data') {
       // A broken published file is worth surfacing even on a background check:
       // the student would otherwise sit on a stale schedule with no explanation.
+      dropBanners('nocheck', 'uptodate');
       banner({
         id: 'baddata',
         tone: 'warn',
@@ -1334,6 +1348,7 @@ async function checkForUpdate({ silent, throttled = silent }) {
       });
     } else if (!silent) {
       // Being offline is the normal case, so only mention it when asked directly.
+      dropBanners('uptodate');
       banner({ id: 'nocheck', tone: 'warn', text: 'Δεν έγινε έλεγχος — δεν υπάρχει σύνδεση.' });
     }
   } finally {
@@ -1530,7 +1545,9 @@ function wire() {
 
   $('checkBtn').addEventListener('click', () => checkForUpdate({ silent: false }));
   $('retryBtn').addEventListener('click', start);
-  window.addEventListener('online', start);
+  // Back online: a first load gets its retry, and a «Έλεγχος» tapped with no
+  // signal its answer. Otherwise it is a background check like any other.
+  window.addEventListener('online', () => checkForUpdate({ silent: true }));
 
   // iOS suspends timers while the app is backgrounded, so the highlight would be
   // stale at exactly the moment a student reopens it. Recompute on every return.

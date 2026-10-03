@@ -184,6 +184,12 @@ If the very first load fails (a first visit with no signal), the app says so
 in Greek with a «Δοκίμασε ξανά» button, and tries again by itself when the phone
 comes back online or the app is reopened.
 
+A «Έλεγχος» tapped with no signal is answered the same way: the next check
+that gets through — the phone coming back online, or the app being reopened —
+gives the answer, throttle or not. Each answer replaces the one before, so
+«Δεν έγινε έλεγχος — δεν υπάρχει σύνδεση» never stays up beside the «Νέο
+πρόγραμμα» or «ενημερωμένο» that came after it.
+
 Both update banners — «Νέο πρόγραμμα» and «Νέα έκδοση της εφαρμογής» — come
 back on every open until tapped. The downloaded schedule is kept aside
 (`gel7.pending.v1`) so it is offered again straight away, offline too, rather

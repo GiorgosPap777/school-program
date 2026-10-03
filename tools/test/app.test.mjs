@@ -26,23 +26,36 @@ const SCHEDULE = JSON.parse(SCHEDULE_TEXT);
 function element() {
   return {
     innerHTML: '', className: '', textContent: '', hidden: false, disabled: false,
-    style: {}, dataset: {}, children: [],
-    setAttribute() {}, addEventListener() {}, remove() {}, showModal() {}, close() {},
+    style: {}, dataset: {}, children: [], parent: null,
+    setAttribute() {}, addEventListener() {}, showModal() {}, close() {},
     insertAdjacentHTML() {},
-    appendChild(child) { this.children.push(child); return child; },
+    appendChild(child) { this.children.push(child); child.parent = this; return child; },
+    remove() {
+      const siblings = this.parent ? this.parent.children : [];
+      if (siblings.includes(this)) siblings.splice(siblings.indexOf(this), 1);
+      this.parent = null;
+    },
     querySelector: () => null, querySelectorAll: () => [],
   };
 }
 
 const elements = new Map();
+// What wire() hangs on window and document, so a test can fire it.
+const listeners = { window: {}, document: {} };
 const document = {
   getElementById(id) {
     if (!elements.has(id)) elements.set(id, element());
     return elements.get(id);
   },
   createElement: element,
-  querySelector: () => null,
+  // Only the one lookup app.js does by selector: a banner by its id.
+  querySelector(selector) {
+    const m = /^\[data-banner="([^"]+)"\]$/.exec(selector);
+    return (m && document.getElementById('banners').children
+      .find((b) => b.dataset.banner === m[1])) || null;
+  },
   querySelectorAll: () => [],
+  addEventListener: (type, fn) => { listeners.document[type] = fn; },
 };
 
 const storage = new Map();
@@ -65,6 +78,7 @@ const sandbox = {
   fetch: async () => { throw new TypeError('no fetch stubbed'); },
 };
 sandbox.window = sandbox;
+sandbox.addEventListener = (type, fn) => { listeners.window[type] = fn; };
 vm.createContext(sandbox);
 vm.runInContext(withoutBoot, sandbox, { filename: 'app.js' });
 
@@ -555,6 +569,49 @@ await test('a real answer with nothing newer says the schedule is current', asyn
   await app('checkForUpdate')({ silent: false });
   assert.deepEqual(shown.map((b) => b.dataset.banner), ['uptodate']);
   assert.ok(localStorage.getItem(app('KEY_LAST_CHECK')), 'a real check is recorded');
+});
+
+await test('the next check that gets through replaces «no connection»', async () => {
+  // «Έλεγχος» tapped with no signal, then mobile data turned on: the next check
+  // found the new schedule, and «Δεν έγινε έλεγχος — δεν υπάρχει σύνδεση»
+  // stayed up above its «Νέο πρόγραμμα».
+  const newer = { ...JSON.parse(SCHEDULE_TEXT), version: '2099-01-01', generatedAt: '2099-01-01T00:00:00Z' };
+  const offline = async () => new Response(SCHEDULE_TEXT, {
+    status: 200, headers: { 'X-Served-From': 'cache' },
+  });
+  const shown = document.getElementById('banners').children;
+  const ids = () => shown.map((b) => b.dataset.banner);
+  state.schedule = JSON.parse(SCHEDULE_TEXT);
+  state.selection = null;
+  storage.clear();
+  shown.length = 0;
+  app('wire')();
+
+  sandbox.fetch = offline;
+  await app('checkForUpdate')({ silent: false });
+  assert.deepEqual(ids(), ['nocheck']);
+  // Back online. A check from just before the signal went must not hold the
+  // answer back for half an hour.
+  storage.set(app('KEY_LAST_CHECK'), String(Date.now()));
+  sandbox.fetch = async () => new Response(JSON.stringify(newer), { status: 200 });
+  await listeners.window.online();
+  assert.deepEqual(ids(), ['newdata'], 'coming back online answers the check');
+
+  // Nothing newer: the answer is that, even from a background check.
+  shown.length = 0;
+  storage.clear();
+  sandbox.fetch = offline;
+  await app('checkForUpdate')({ silent: false });
+  sandbox.fetch = async () => new Response(SCHEDULE_TEXT, { status: 200 });
+  await app('checkForUpdate')({ silent: true });
+  assert.deepEqual(ids(), ['uptodate']);
+
+  // And the other way round.
+  sandbox.fetch = offline;
+  await app('checkForUpdate')({ silent: false });
+  assert.deepEqual(ids(), ['nocheck']);
+  shown.length = 0;
+  storage.clear();
 });
 
 /* ------------------------------------------------------------------- report */
