@@ -5,7 +5,7 @@ and **elective groups** into one timetable, and highlights the period that is
 running right now. Works offline once loaded, installs to the home screen on both
 iOS and Android, and picks up new schedule revisions without an app rewrite.
 
-The school publishes its timetable as an aSc Timetables PDF — 56 pages this
+The school publishes its timetable as an aSc Timetables PDF — 50 pages this
 revision — where a single student's week is spread across three separate pages. This app does that merge for
 them.
 
@@ -155,7 +155,7 @@ so without a bump the old files stay cached on every installed phone.
 
 No flags are normally needed: `--version` defaults to the creation date in the
 PDF footer, and `--valid-from` / `--valid-to` to the «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ
-28-9-26» banner aSc prints under every grid. Pass them only to override what the
+5-10-26» banner aSc prints under every grid. Pass them only to override what the
 PDF says. A revision with no end date in the banner simply has no `validTo`, and
 the app's footer reads «ισχύει από …» instead of a range.
 
@@ -221,10 +221,10 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 ```jsonc
 {
   "schemaVersion": 1,
-  "version": "2026-09-25",               // compared for update detection
-  "generatedAt": "2026-09-27T09:51:25+00:00",
-  "sourceDate": "2026-09-25",            // the date printed in the PDF footer
-  "validFrom": "2026-09-28", "validTo": null,   // read off the PDF's own banner
+  "version": "2026-10-02",               // compared for update detection
+  "generatedAt": "2026-10-03T07:41:08+00:00",
+  "sourceDate": "2026-10-02",            // the date printed in the PDF footer
+  "validFrom": "2026-10-05", "validTo": null,   // read off the PDF's own banner
   "days": ["Δευτέρα", "…"],
   "periods": [{ "n": 1, "start": "08:10", "end": "08:55" }],
   "rooms": { "ΕΠ": "Εργαστήριο Πληροφορικής" },
@@ -399,8 +399,8 @@ Four things keep it there, all of which are easy to undo by accident:
   gets those back as 304s. `reload` fetched everything again — 76 KB for a first
   install instead of 45 KB, and every icon re-sent on every update.
 
-Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 88 KB raw and
-5.6 KB gzipped, so serving it uncompressed costs 16× more. nginx's default
+Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 87 KB raw and
+5.5 KB gzipped, so serving it uncompressed costs 16× more. nginx's default
 `gzip_comp_level` of 1 only gets it to 7.8 KB; the bundled config sets 6.
 
 ## Testing
@@ -439,7 +439,7 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
 ## Notes and known limits
 
 - **The PDF says when it starts.** Every page carries a banner —
-  «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ 28-9-26», sometimes with an «εως …» end — and the
+  «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ 5-10-26», sometimes with an «εως …» end — and the
   converter reads `validFrom`/`validTo` from it instead of from a flag that is
   easy to forget or mistype. The report prints the banner it found.
 - **Class labels are folded to one spelling.** Whoever types the timetable into
@@ -514,7 +514,7 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
   teacher. Remove the code from that list to start showing it again. `ΕΠ`
   (Εργαστήριο Πληροφορικής) is the only room the PDF itself supplies today.
 - **Groups with no lessons are hidden — except «κόντρα» electives.** The current
-  PDF has pages for 14 groups that carry no lessons, including Γ6 and Γ7, which
+  PDF has pages for 8 groups that carry no lessons, including Γ6 and Γ7, which
   are not real classes and were exported by accident. They stay in
   `schedule.json` (so a later revision that fills them just works) but the picker
   never offers them. A κόντρα elective is the exception: it is a real, active
