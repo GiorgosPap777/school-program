@@ -27,7 +27,8 @@ function element() {
   return {
     innerHTML: '', className: '', textContent: '', hidden: false, disabled: false,
     style: {}, dataset: {}, children: [], parent: null,
-    setAttribute() {}, addEventListener() {}, showModal() {}, close() {},
+    classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
+    setAttribute() {}, addEventListener() {}, showModal() {}, close() {}, focus() {},
     insertAdjacentHTML() {},
     appendChild(child) { this.children.push(child); child.parent = this; return child; },
     remove() {
@@ -611,6 +612,187 @@ await test('the next check that gets through replaces «no connection»', async 
   await app('checkForUpdate')({ silent: false });
   assert.deepEqual(ids(), ['nocheck']);
   shown.length = 0;
+  storage.clear();
+});
+
+/* ------------------------------------------------- the student's own changes */
+
+await test('a change goes only over the lesson it was made against', async () => {
+  const base = app('buildGrid')(TINY, X1).grid;
+  const { grid, marks } = app('applyChanges')(base, {
+    '0-2': { subject: 'Λογοτεχνία', teacher: 'Κ', room: 'Αίθ. 9', group: '', was: 'Ιστορία' },
+    '0-3': { subject: 'Αγγλικά', teacher: '', room: '', group: '', was: '' },
+    '0-4': { free: true, was: 'Φυσική' },
+    // Made against a lesson that is not there any more: an orientation
+    // picked since, say. It must not land on Χημεία.
+    '1-1': { subject: 'Μουσική', teacher: '', room: '', group: '', was: 'Γαλλικά' },
+    '9-9': { free: true, was: '' },
+  });
+  assert.equal(grid[0][1].subject, 'Λογοτεχνία');
+  assert.equal(grid[0][2].subject, 'Αγγλικά');
+  assert.equal(grid[0][3], null);
+  assert.equal(grid[1][0].subject, 'Χημεία');
+  assert.deepEqual([...marks.keys()].sort(), ['0-2', '0-3', '0-4']);
+  assert.equal(base[0][1].subject, 'Ιστορία', 'the timetable itself was changed');
+  state.schedule = TINY;
+  assert.equal(app('lessonRoom')(grid[0][1]), 'Αίθ. 9');
+  assert.equal(app('lessonRoom')(grid[0][2]), '', 'a typed lesson got a room nobody gave it');
+});
+
+await test('changes are kept only with the timetable they were made on', async () => {
+  storage.clear();
+  state.schedule = JSON.parse(SCHEDULE_TEXT);
+  const mine = { Α1: { '0-3': { subject: 'Λογοτεχνία', teacher: 'Τ', room: 'Ρ', group: 'Α1', was: 'Γλώσσα / Λογοτεχνία' } } };
+  state.changes = JSON.parse(JSON.stringify(mine));
+  app('storeChanges')();
+  assert.deepEqual(JSON.parse(JSON.stringify(app('loadChanges')(state.schedule))), mine);
+  const corrected = { ...state.schedule, generatedAt: '2099-01-01T00:00:00Z' };
+  assert.deepEqual({ ...app('loadChanges')(corrected) }, {}, 'kept onto a different timetable');
+  storage.set(app('KEY_CHANGES'), '{not json');
+  assert.deepEqual({ ...app('loadChanges')(state.schedule) }, {});
+  storage.set(app('KEY_CHANGES'), JSON.stringify({ stamp: app('stamp')(state.schedule),
+    classes: { Α1: { 'x': { subject: 'Α', was: '' }, '0-1': { subject: ' ', was: '' }, '0-2': { free: true } } } }));
+  assert.deepEqual({ ...app('loadChanges')(state.schedule) }, {}, 'malformed changes were kept');
+  // Nothing left: nothing stored.
+  state.changes = { Α1: {} };
+  app('storeChanges')();
+  assert.equal(storage.has(app('KEY_CHANGES')), false);
+});
+
+/** A class with a «Γλώσσα / Λογοτεχνία» hour in the real data, and that hour. */
+function combinedHour() {
+  for (const g of Object.values(SCHEDULE.groups)) {
+    if (g.kind !== 'section' || g.hidden) continue;
+    const l = g.lessons.find((x) => app('halves')(x.subject).length);
+    if (l) return { section: g.label, grade: g.grade, d: l.d, p: l.p, lesson: l };
+  }
+  return null;
+}
+
+await test('a half of a combined hour keeps its teacher and room; the timetable\'s own name undoes it', async () => {
+  const hour = combinedHour();
+  assert.ok(hour, 'no «X / Y» hour in the data to check');
+  state.schedule = SCHEDULE;
+  const sel = { grade: hour.grade, section: hour.section, track: null, kontra: null, extras: [] };
+  const base = app('buildGrid')(SCHEDULE, sel).grid;
+  const orig = base[hour.d][hour.p - 1];
+  const [first] = app('halves')(orig.subject);
+  const defaults = app('lessonDefaults')(base, orig, first);
+  assert.equal(defaults.teacher, orig.teacher || '');
+  assert.equal(defaults.room, app('lessonRoom')(orig));
+  const changeFromEdit = app('changeFromEdit');
+  const edit = { orig, free: false, other: false, otherText: '', subject: first, ...defaults };
+  assert.deepEqual({ ...changeFromEdit(edit, base) },
+    { subject: first, teacher: defaults.teacher, room: defaults.room, group: defaults.group, was: orig.subject });
+  const back = { ...edit, subject: orig.subject, ...app('lessonDefaults')(base, orig, orig.subject) };
+  assert.equal(changeFromEdit(back, base), null, 'the timetable\'s own lesson saved as a change');
+  // Only the room changed: that is a change, for the few who use it.
+  assert.equal(changeFromEdit({ ...back, room: 'Βιβλιοθήκη' }, base).room, 'Βιβλιοθήκη');
+  // A free hour left free is no change; a lesson made free is.
+  assert.equal(changeFromEdit({ orig: null, free: true }, base), null);
+  assert.deepEqual({ ...changeFromEdit({ orig, free: true }, base) }, { free: true, was: orig.subject });
+  // A typed name brings no teacher, room or group of its own.
+  assert.deepEqual({ ...changeFromEdit({ orig, other: true, otherText: ' Θέατρο ', teacher: '', room: '', group: 'Χ' }, base) },
+    { subject: 'Θέατρο', teacher: '', room: '', group: '', was: orig.subject });
+});
+
+await test('a subject from the week brings the teacher who teaches it', async () => {
+  state.schedule = SCHEDULE;
+  for (const sel of selections.filter((s) => !s.track && !s.kontra && !s.extras.length)) {
+    const base = app('buildGrid')(SCHEDULE, sel).grid;
+    for (const subject of app('weekSubjects')(base)) {
+      const got = app('lessonDefaults')(base, null, subject);
+      const theirs = base.flat().filter((l) => l && !l.unpicked
+        && (l.subject === subject || app('halves')(l.subject).includes(subject)));
+      assert.ok(theirs.some((l) => (l.teacher || '') === got.teacher && app('lessonRoom')(l) === got.room),
+        `${describe(sel)}: ${subject} came with ${got.teacher} / ${got.room}`);
+    }
+  }
+});
+
+await test('outside edit mode a tap on a lesson does nothing', async () => {
+  const hour = combinedHour();
+  state.schedule = SCHEDULE;
+  state.selection = { grade: hour.grade, section: hour.section, track: null, kontra: null, extras: [] };
+  state.changes = {};
+  state.editing = false;
+  app('render')();
+  let opened = 0;
+  document.getElementById('editSheet').showModal = () => { opened++; };
+  const tap = { type: 'click', target: { closest: () => ({ dataset: { d: String(hour.d), p: String(hour.p) } }) } };
+  app('onSlotTap')(tap);
+  assert.equal(opened, 0, 'a tap outside edit mode opened the editor');
+  app('setEditing')(true);
+  app('onSlotTap')(tap);
+  assert.equal(opened, 1, 'a tap in edit mode did not');
+  assert.equal(state.edit.orig.subject, hour.lesson.subject);
+  app('setEditing')(false);
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+});
+
+await test('the day list marks a change and keeps a row for an emptied last hour', async () => {
+  state.schedule = TINY;
+  state.selection = X1;
+  state.changes = { Χ1: { '0-4': { free: true, was: 'Φυσική' } } };
+  state.editing = false;
+  const list = document.getElementById('todayList');
+  const rows = () => {
+    list.children.length = 0;
+    const built = app('buildGrid')(TINY, X1);
+    const mine = app('applyChanges')(built.grid, state.changes.Χ1);
+    state.baseGrid = built.grid;
+    state.grid = mine.grid;
+    state.marks = mine.marks;
+    return (d) => {
+      list.children.length = 0;
+      app('renderDayList')(list, d, app('clockStatus')(TINY, new Date('2026-10-04T12:00')), false);
+      return list.children;
+    };
+  };
+  const day = rows();
+  const monday = day(0);
+  assert.equal(monday.length, 4, 'the emptied 4th hour has no row to undo it from');
+  assert.match(monday[3].innerHTML, /Κενό/);
+  assert.match(monday[3].innerHTML, /στο πρόγραμμα: Φυσική/);
+  assert.doesNotMatch(monday[1].innerHTML, /στο πρόγραμμα/, 'an unchanged hour was marked');
+  // Edit mode lists every hour of the school day, so one can be added at the end.
+  assert.equal(day(1).length, 1);
+  state.editing = true;
+  assert.equal(day(1).length, TINY.periods.length);
+  state.editing = false;
+  state.changes = {};
+  state.marks = new Map();
+});
+
+await test('a new timetable warns before it wipes the changes, then asks for them back', async () => {
+  const hour = combinedHour();
+  const real = JSON.parse(SCHEDULE_TEXT);
+  const newer = { ...JSON.parse(SCHEDULE_TEXT), version: '2099-01-01', generatedAt: '2099-01-01T00:00:00Z' };
+  const shown = document.getElementById('banners').children;
+  const text = (id) => (shown.find((b) => b.dataset.banner === id) || {}).innerHTML || '';
+  storage.clear();
+  shown.length = 0;
+  state.schedule = real;
+  state.selection = { grade: hour.grade, section: hour.section, track: null, kontra: null, extras: [] };
+  const [first] = app('halves')(hour.lesson.subject);
+  state.changes = { [hour.section]: { [`${hour.d}-${hour.p}`]: {
+    subject: first, teacher: '', room: '', group: '', was: hour.lesson.subject } } };
+  app('storeChanges')();
+
+  app('offerSchedule')(newer);
+  assert.match(text('newdata'), /Οι αλλαγές σου θα σβηστούν/);
+  app('applySchedule')(newer);
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  assert.deepEqual({ ...state.changes }, {});
+  assert.equal(storage.has(app('KEY_CHANGES')), false, 'the old changes are still stored');
+  assert.match(text('changes'), /σβήστηκαν/);
+  assert.deepEqual(Array.from(state.recall, (r) => [r.d, r.p, r.subject]), [[hour.d, hour.p, first]]);
+  // Nothing to warn about without changes.
+  shown.length = 0;
+  app('offerSchedule')({ ...newer, version: '2099-02-01' });
+  assert.doesNotMatch(text('newdata'), /αλλαγές/);
+  shown.length = 0;
+  state.recall = null;
   storage.clear();
 });
 

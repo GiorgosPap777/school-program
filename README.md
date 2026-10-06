@@ -204,7 +204,7 @@ browser never fires `updatefound` for it a second time.
 ```
 index.html                app shell (Greek UI)
 app.css                   mobile-first styles, light + dark, safe-area aware
-app.js                    picker, merge, live highlighting, update checks, themes
+app.js                    picker, merge, own changes, live highlighting, update checks, themes
 sw.js                     service worker — cache-first shell, network-first data
 manifest.webmanifest
 data/schedule.json        the only file that changes per revision
@@ -228,7 +228,7 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 {
   "schemaVersion": 1,
   "version": "2026-10-02",               // compared for update detection
-  "generatedAt": "2026-10-03T07:41:08+00:00",
+  "generatedAt": "2026-10-06T07:58:02+00:00",
   "sourceDate": "2026-10-02",            // the date printed in the PDF footer
   "validFrom": "2026-10-05", "validTo": null,   // read off the PDF's own banner
   "days": ["Δευτέρα", "…"],
@@ -372,6 +372,64 @@ The splash screen and Android's task-switcher colour come from
 
 ---
 
+## The student's own changes
+
+The PDF gives «Γλώσσα / Λογοτεχνία» as one lesson, and which of those hours
+are Γλώσσα and which Λογοτεχνία is up to the teacher; only the student knows.
+Other hours can differ from the timetable too. So a student can change any hour
+of their own week: the subject, or make it «Κενό», or put a lesson in a free
+hour.
+
+**Ordinary students see nothing new.** A tap on a lesson does nothing, as it
+always has. The way in is one button at the bottom of the ⚙ sheet, «✎ Αλλαγές
+στο πρόγραμμα», which saves whatever was picked above it and puts the
+timetable into an edit mode. In edit mode a bar under the tabs reads «Πάτα ένα
+μάθημα για να το αλλάξεις», every hour carries a ✎, and the day lists every
+period of the school day, so a lesson can be added after the last. «Τέλος»
+leaves it, and so does closing the app (it is never saved). A switch in
+settings would have been simpler, but one left on turns every tap into an edit
+weeks later.
+
+Tapping an hour opens a sheet with:
+
+- the hour's own names first: what the timetable says, both halves of a
+  «Γλώσσα / Λογοτεχνία», «Κενό», and «Άλλο…» for typing a name;
+- then every other subject in the student's week.
+
+A half keeps the hour's teacher and room, since it is the same lesson. A
+subject from the week brings the teacher and room it usually has there. A typed
+name brings nothing, because there is nothing to go on. Teacher and room can be
+edited under «Προχωρημένα: καθηγητής και αίθουσα», which stays closed unless
+opened. Choosing what the timetable already says removes the change rather than
+saving a copy of it.
+
+A changed hour always says so: a bar down the side and «✎ στο πρόγραμμα:
+Γλώσσα / Λογοτεχνία» under it, and a ✎ in the week grid. That way it is never
+taken for the school's timetable, by the student months later or by whoever
+they show it to. An hour made «Κενό» keeps its row for the same reason. The ⚙
+sheet lists every change for the class, each with a ✕, plus «Σβήσε όλες».
+
+Changes live on the phone only, in `gel7.changes.v1`, per class (`section` →
+`"d-p"` → change), together with the stamp of the timetable they were made on.
+Each one also records what the hour held (`was`). It is only drawn over that
+lesson, so after picking a different orientation, a change to one of its hours
+just stops applying rather than landing on another subject.
+
+**A new timetable wipes them**, a correction included, since either can move
+hours. The «Νέο πρόγραμμα» banner warns first («Οι αλλαγές σου θα
+σβηστούν.»). After the update, a banner says they were removed and offers
+«Αλλαγές», which opens edit mode with a reminder of what the student had
+(«Τρίτη 4η → Λογοτεχνία»), kept until «Τέλος». Carrying them over by hour
+number would put a «Λογοτεχνία» on whatever lands in that hour next. A change
+saved against a different timetable stamp is ignored on load, so no other path
+can bring one back either.
+
+In the week grid an unchanged combined hour reads «Γλ./Λογ.» (`subjectShort`
+in `tools/aliases.json`), not plain «Γλώσσα», so it is not mistaken for an hour
+the student has set.
+
+---
+
 ## Bandwidth
 
 Sized for a slow home uplink, because that is what this usually ships from.
@@ -427,6 +485,11 @@ first-load and update-check cases run against a small hand-made timetable
 instead. The theme cases check that custom colours and every preset stay
 readable, and that app.js, app.css and index.html agree on which themes exist.
 One more checks the `<head>` script's hash against the one `docker/default.conf` allows.
+The own-changes cases check that a change only goes over the lesson it was made
+against, is dropped with the timetable it was made on, keeps a half's teacher
+and room, and is undone by choosing the timetable's own lesson. They also check
+that a tap does nothing outside edit mode, and that a new timetable warns before
+wiping the changes and then asks for them back.
 
 `tools/test/make_fixtures.py` builds the schedule variants used to exercise the
 update path by hand (a newer revision, one that drops a track, one that introduces

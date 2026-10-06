@@ -39,7 +39,7 @@
   },
   "subjectShort": {
     "_comment": "Optional compact labels for the narrow week-grid cells. Falls back to the canonical name.",
-    "Γλώσσα / Λογοτεχνία": "Γλώσσα",
+    "Γλώσσα / Λογοτεχνία": "Γλ./Λογ.",
     "Μαθηματικά Προσανατολισμού": "Μαθ. Προσ.",
     "Αρχαία Προσανατολισμού": "Αρχαία Προσ.",
     "Βιολογία Προσανατολισμού": "Βιολ. Προσ.",

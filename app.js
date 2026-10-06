@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.10.3';
+const APP_VERSION = '1.11.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -22,6 +22,7 @@ const KEY_SCHEDULE = 'gel7.schedule.v1';
 const KEY_DISMISSED = 'gel7.dismissed.v1';
 const KEY_LAST_CHECK = 'gel7.lastcheck.v1';
 const KEY_PENDING = 'gel7.pending.v1';
+const KEY_CHANGES = 'gel7.changes.v1';
 // index.html reads this one too, before anything is drawn — see the <head>.
 const KEY_THEME = 'gel7.theme.v1';
 
@@ -38,6 +39,16 @@ const state = {
   schedule: null,
   selection: null,
   grid: null,
+  // The week as the school's timetable has it, before the student's own changes.
+  baseGrid: null,
+  // Which hours of `grid` are the student's own changes: `d-p` -> the change.
+  marks: new Map(),
+  // Every class's changes: section -> `d-p` -> change. See loadChanges().
+  changes: {},
+  editing: false,
+  edit: null,
+  // What the student had changed before a new timetable wiped it, as a reminder.
+  recall: null,
   conflicts: [],
   view: 'today',
   weekDay: 0,
@@ -423,6 +434,140 @@ function findNext(grid, fromDay, fromPeriod) {
   return null;
 }
 
+/* ------------------------------------------------- the student's own changes */
+
+const hourKey = (d, p) => `${d}-${p}`;
+
+/** The two names of a lesson the timetable gives as one — «Γλώσσα /
+    Λογοτεχνία» — or nothing for an ordinary one. Which hours are which only
+    the student knows; the PDF does not say. */
+function halves(subject) {
+  const parts = String(subject || '').split(' / ').map((s) => s.trim()).filter(Boolean);
+  return parts.length > 1 ? parts : [];
+}
+
+/** The student's own changes, by class and then by hour (`d-p`, as in
+    schedule.json). They are only trusted with the timetable they were made
+    on: the hours move with every new PDF, and a «Λογοτεχνία» carried onto
+    whatever lands in that hour next is worse than none. Anything malformed is
+    dropped rather than drawn. */
+function loadChanges(schedule) {
+  const saved = load(KEY_CHANGES, null);
+  if (!saved || saved.stamp !== stamp(schedule) || !saved.classes
+      || typeof saved.classes !== 'object') return {};
+  const text = (value) => (typeof value === 'string' ? value : '');
+  const out = {};
+  for (const [section, hours] of Object.entries(saved.classes)) {
+    if (!hours || typeof hours !== 'object') continue;
+    for (const [key, c] of Object.entries(hours)) {
+      if (!/^\d+-\d+$/.test(key) || !c || typeof c.was !== 'string') continue;
+      if (!c.free && !text(c.subject).trim()) continue;
+      (out[section] = out[section] || {})[key] = c.free
+        ? { free: true, was: c.was }
+        : { subject: c.subject, teacher: text(c.teacher), room: text(c.room),
+            group: text(c.group), was: c.was };
+    }
+  }
+  return out;
+}
+
+function storeChanges() {
+  for (const section of Object.keys(state.changes)) {
+    if (!Object.keys(state.changes[section]).length) delete state.changes[section];
+  }
+  if (Object.keys(state.changes).length) {
+    save(KEY_CHANGES, { stamp: stamp(state.schedule), classes: state.changes });
+  } else {
+    localStorage.removeItem(KEY_CHANGES);
+  }
+}
+
+/** One class's changes — the live object, so deleting from it deletes. */
+function classChanges(section, create) {
+  if (!section) return {};
+  if (create && !state.changes[section]) state.changes[section] = {};
+  return state.changes[section] || {};
+}
+
+/** The week with the student's changes laid over it, and which hours they
+    are. A change only goes over the lesson it was made against: an
+    orientation picked since puts another lesson in that hour, and the change
+    was never about that one. The base grid is left as it was — the edit
+    sheet needs it to say what the timetable has. */
+function applyChanges(base, changes) {
+  const grid = base.map((row) => row.slice());
+  const marks = new Map();
+  for (const [key, change] of Object.entries(changes || {})) {
+    const [d, p] = key.split('-').map(Number);
+    const row = grid[d];
+    if (!row || p < 1 || p > row.length) continue;
+    const orig = row[p - 1];
+    if ((orig ? orig.subject : '') !== change.was) continue;
+    row[p - 1] = change.free ? null : {
+      d, p, subject: change.subject, teacher: change.teacher,
+      room: change.room, group: change.group, changed: true,
+    };
+    marks.set(key, change);
+  }
+  return { grid, marks };
+}
+
+/** Every subject in the student's week, «Γλώσσα / Λογοτεχνία» as its two
+    halves, so any hour can be turned into any of them. */
+function weekSubjects(base) {
+  const names = new Set();
+  for (const row of base) {
+    for (const l of row) {
+      if (!l || l.unpicked) continue;
+      const parts = halves(l.subject);
+      (parts.length ? parts : [l.subject]).forEach((n) => names.add(n));
+    }
+  }
+  return [...names].sort((a, b) => a.localeCompare(b, 'el'));
+}
+
+/** The teacher and room that come with a subject picked for an hour. One of
+    the hour's own names is the same lesson: same teacher, same room. Any
+    other is taken from where it is in the week — the most usual pairing,
+    if there is more than one. A subject nowhere in the week brings nothing:
+    there is nothing to go on, and a guess would be made up. */
+function lessonDefaults(base, orig, subject) {
+  if (orig && (subject === orig.subject || halves(orig.subject).includes(subject))) {
+    return { teacher: orig.teacher || '', room: lessonRoom(orig), group: orig.group || '' };
+  }
+  const seen = new Map();
+  for (const row of base) {
+    for (const l of row) {
+      if (!l || l.unpicked) continue;
+      if (l.subject !== subject && !halves(l.subject).includes(subject)) continue;
+      const found = { teacher: l.teacher || '', room: lessonRoom(l), group: l.group || '' };
+      const id = JSON.stringify(found);
+      const entry = seen.get(id) || { found, n: 0 };
+      entry.n++;
+      seen.set(id, entry);
+    }
+  }
+  let best = null;
+  for (const entry of seen.values()) if (!best || entry.n > best.n) best = entry;
+  return best ? best.found : { teacher: '', room: '', group: '' };
+}
+
+/** What to keep for the hour being edited, or null when it comes out the same
+    as the timetable — the student has tapped their way back to what the
+    school says, and there is nothing of theirs left to mark. */
+function changeFromEdit(edit, base) {
+  const was = edit.orig ? edit.orig.subject : '';
+  if (edit.free) return edit.orig ? { free: true, was } : null;
+  const subject = (edit.other ? edit.otherText : edit.subject || '').trim();
+  const teacher = (edit.teacher || '').trim();
+  const room = (edit.room || '').trim();
+  if (edit.orig && subject === edit.orig.subject) {
+    const usual = lessonDefaults(base, edit.orig, subject);
+    if (teacher === usual.teacher && room === usual.room) return null;
+  }
+  return { subject, teacher, room, group: edit.other ? '' : edit.group || '', was };
+}
+
 /* --------------------------------------------------------------- clock status */
 
 /** Where the wall clock sits relative to today's periods. */
@@ -455,7 +600,10 @@ function slotStatus(status, dayIdx, periodIdx) {
 function render() {
   if (!state.schedule || !state.selection) return;
   const built = buildGrid(state.schedule, state.selection);
-  state.grid = built.grid;
+  const mine = applyChanges(built.grid, classChanges(state.selection.section));
+  state.baseGrid = built.grid;
+  state.grid = mine.grid;
+  state.marks = mine.marks;
   state.conflicts = built.conflicts;
 
   const date = now();
@@ -476,6 +624,7 @@ function render() {
   renderDayList($('weekList'), state.weekDay, status);
   renderWeekGrid(status);
   renderFooter();
+  renderEditing();
 }
 
 /** True when today holds nothing further — the last lesson has ended, the day
@@ -581,9 +730,22 @@ function renderStatusCard(date, status, rolled, listedDay) {
       + ` (${state.schedule.periods[upcoming.p].start})`);
 }
 
+/** The last hour of a day worth a row. An hour the student emptied still
+    gets one, so the change can be seen — and undone. In edit mode every hour
+    of the school day does, so a lesson can be added after the last. */
+function lastShownPeriod(dayIdx) {
+  if (state.editing) return state.schedule.periods.length - 1;
+  let last = lastUsedPeriod(state.grid[dayIdx]);
+  for (const key of state.marks.keys()) {
+    const [d, p] = key.split('-').map(Number);
+    if (d === dayIdx) last = Math.max(last, p - 1);
+  }
+  return last;
+}
+
 function renderDayList(target, dayIdx, status, withHeading) {
   const row = state.grid[dayIdx];
-  const last = lastUsedPeriod(row);
+  const last = lastShownPeriod(dayIdx);
   target.innerHTML = '';
 
   if (withHeading) {
@@ -648,8 +810,19 @@ function renderDayList(target, dayIdx, status, withHeading) {
       instead += '<p class="slot__instead">δεν έχεις διαλέξει ομάδα</p>';
     }
 
+    // The student's own change: always said, so it is never taken for the
+    // school's timetable — by them months later, or by whoever they show it to.
+    const mark = state.marks.get(hourKey(dayIdx, p + 1));
+    if (mark) {
+      classes.push('slot--changed');
+      instead += `<p class="slot__instead">✎ στο πρόγραμμα: ${esc(mark.was || 'Κενό')}</p>`;
+    }
+
     const li = document.createElement('li');
     li.className = classes.join(' ');
+    li.dataset.d = String(dayIdx);
+    li.dataset.p = String(p + 1);
+    if (state.editing) li.tabIndex = 0;
     li.innerHTML = `
       <div class="slot__when">
         <span class="slot__no">${p + 1}η ώρα</span>
@@ -721,7 +894,7 @@ function renderWeekGrid(status) {
   if (!state.showGrid) return;
 
   const days = state.schedule.days;
-  const maxPeriod = Math.max(...state.grid.map(lastUsedPeriod), 0);
+  const maxPeriod = Math.max(...days.map((d, i) => lastShownPeriod(i)), 0);
 
   let html = '<table class="grid"><thead><tr><th scope="col">Ώρα</th>';
   html += days.map((d, i) => `<th scope="col" data-day="${i}"`
@@ -737,7 +910,11 @@ function renderWeekGrid(status) {
       if (d === state.weekDay) cls.push('is-picked');
       if (slotStatus(status, d, p) === 'now') cls.push('is-now');
       if (lesson && lesson.clash) cls.push('is-conflict');
-      html += `<td${cls.length ? ` class="${cls.join(' ')}"` : ''}>`;
+      const changed = state.marks.has(hourKey(d, p + 1));
+      if (changed) cls.push('is-changed');
+      html += `<td data-d="${d}" data-p="${p + 1}"${state.editing ? ' tabindex="0"' : ''}`
+        + `${cls.length ? ` class="${cls.join(' ')}"` : ''}>`;
+      if (!lesson && changed) html += '<div class="grid__subject grid__free">Κενό</div>';
       if (lesson) {
         html += `<div class="grid__subject">${esc(shortSubject(lesson.subject))}</div>`;
         const who = teacherHtml(lesson, true);
@@ -785,6 +962,9 @@ function roomName(code) {
     orientation hours, so it is worth showing on every row. */
 function lessonRoom(lesson) {
   if (!lesson) return '';
+  // The student's own change carries the room they kept or typed, and that is
+  // the answer, blank included.
+  if (lesson.changed) return lesson.room || '';
   // Some lessons have nowhere to name: Γυμναστική is out in the προαύλιο. The
   // class's own room is exactly the wrong answer there, so say nothing rather
   // than send the student indoors. Which subjects those are is the school's to
@@ -952,7 +1132,274 @@ function renderPicker() {
       }))));
   }
 
+  if (draft.section) body.appendChild(changesField(draft));
+
   finishPicker(draft.section ? '' : 'Διάλεξε τμήμα για να συνεχίσεις.');
+}
+
+function commitPicker() {
+  if (!state.draft.section) return false;
+  state.selection = state.draft;
+  save(KEY_SELECTION, state.selection);
+  $('picker').close();
+  render();
+  return true;
+}
+
+/** «Δικές σου αλλαγές»: the way into edit mode, and every change this class
+    has, each with its ✕. The only part of the feature a student who never
+    uses it ever sees. */
+function changesField(draft) {
+  const wrap = document.createElement('div');
+  wrap.className = 'field';
+  wrap.innerHTML = '<p class="field__label">Δικές σου αλλαγές</p>'
+    + '<p class="field__note">Για ώρες που δεν είναι όπως στο πρόγραμμα του σχολείου.'
+    + ' Μένουν μόνο σε αυτό το κινητό και σβήνονται όταν βγει νέο πρόγραμμα.</p>';
+
+  const mine = classChanges(draft.section);
+  const keys = Object.keys(mine).sort((a, b) => {
+    const [ad, ap] = a.split('-').map(Number), [bd, bp] = b.split('-').map(Number);
+    return ad - bd || ap - bp;
+  });
+  if (keys.length) {
+    // Measured against the class as it stands in the picker, which may not
+    // be what is saved yet.
+    const base = buildGrid(state.schedule, draft).grid;
+    const list = document.createElement('ul');
+    list.className = 'changes';
+    for (const key of keys) {
+      const c = mine[key];
+      const [d, p] = key.split('-').map(Number);
+      const slot = base[d] && base[d][p - 1];
+      const applies = (slot ? slot.subject : '') === c.was;
+      const day = state.schedule.days[d] || '';
+      const li = document.createElement('li');
+      li.className = 'change';
+      li.innerHTML = `<p><strong>${esc(day)} ${p}η</strong> · ${esc(c.free ? 'Κενό' : c.subject)}`
+        + `<small>${applies ? `αντί για ${esc(c.was || 'Κενό')}`
+          : 'δεν ισχύει με τις τωρινές επιλογές σου'}</small></p>`;
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'change__del';
+      del.setAttribute('aria-label', `Σβήσε την αλλαγή ${day} ${p}η`);
+      del.textContent = '✕';
+      del.addEventListener('click', () => {
+        delete mine[key];
+        storeChanges();
+        render();
+        renderPicker();
+      });
+      li.appendChild(del);
+      list.appendChild(li);
+    }
+    wrap.appendChild(list);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'changes__actions';
+  const edit = document.createElement('button');
+  edit.type = 'button';
+  edit.className = 'ghost-btn';
+  edit.textContent = '✎ Αλλαγές στο πρόγραμμα';
+  // Whatever was just picked above is what gets edited, so it is saved first.
+  edit.addEventListener('click', () => { if (commitPicker()) setEditing(true); });
+  actions.appendChild(edit);
+  if (keys.length > 1) {
+    const all = document.createElement('button');
+    all.type = 'button';
+    all.className = 'ghost-btn';
+    all.textContent = 'Σβήσε όλες';
+    all.addEventListener('click', () => {
+      delete state.changes[draft.section];
+      storeChanges();
+      render();
+      renderPicker();
+    });
+    actions.appendChild(all);
+  }
+  wrap.appendChild(actions);
+  return wrap;
+}
+
+/* ---------------------------------------------------------------- edit mode */
+
+/** Taps on the timetable change it only in here, entered from the settings
+    sheet and left with «Τέλος» (or by closing the app — it is never saved).
+    Everywhere else a tap does what it always did, which is nothing: most
+    students open the app to see their next lesson and nothing more. */
+function setEditing(on) {
+  state.editing = on;
+  if (!on) state.recall = null;
+  render();
+}
+
+function renderEditing() {
+  $('editBar').hidden = !state.editing;
+  $('main').classList.toggle('is-editing', state.editing);
+  const recall = $('editRecall');
+  const items = state.editing && state.recall ? state.recall : [];
+  recall.hidden = !items.length;
+  recall.innerHTML = items.length
+    ? '<p>Πριν από το νέο πρόγραμμα είχες:</p><ul>'
+      + items.map((r) => `<li><strong>${esc(r.day)} ${r.p}η</strong> → ${esc(r.subject)}</li>`).join('')
+      + '</ul>'
+    : '';
+}
+
+function onSlotTap(event) {
+  if (!state.editing) return;
+  if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+  const el = event.target.closest && event.target.closest('[data-p]');
+  if (!el) return;
+  if (event.type === 'keydown') event.preventDefault();
+  openEditSheet(Number(el.dataset.d), Number(el.dataset.p));
+}
+
+/** What the sheet offers for an hour: its own names first — the timetable's,
+    and both halves of a «Γλώσσα / Λογοτεχνία» — then the rest of the week. */
+function editChoices(base, orig) {
+  const own = orig ? [orig.subject, ...halves(orig.subject)] : [];
+  return { own, week: weekSubjects(base).filter((s) => !own.includes(s)) };
+}
+
+function openEditSheet(d, p) {
+  const base = state.baseGrid;
+  if (!base || !base[d] || p < 1 || p > base[d].length) return;
+  const orig = base[d][p - 1];
+  const change = state.marks.get(hourKey(d, p));
+  const edit = { d, p, orig, existing: !!change, free: false, other: false, otherText: '' };
+  if (change && change.free) {
+    edit.free = true;
+  } else if (change) {
+    Object.assign(edit, { subject: change.subject, teacher: change.teacher,
+      room: change.room, group: change.group });
+  } else if (orig) {
+    Object.assign(edit, { subject: orig.subject }, lessonDefaults(base, orig, orig.subject));
+  } else {
+    edit.free = true;
+  }
+  if (!edit.free) {
+    const { own, week } = editChoices(base, orig);
+    // A name typed in earlier goes back into «Άλλο…», where it came from.
+    edit.other = !own.includes(edit.subject) && !week.includes(edit.subject);
+    if (edit.other) edit.otherText = edit.subject;
+    // Open the advanced part only for someone who has used it on this hour.
+    const usual = edit.other ? { teacher: '', room: '' } : lessonDefaults(base, orig, edit.subject);
+    edit.advanced = edit.teacher !== usual.teacher || edit.room !== usual.room;
+  }
+  state.edit = edit;
+  renderEditSheet();
+  $('editSheet').showModal();
+}
+
+function renderEditSheet() {
+  const e = state.edit;
+  const base = state.baseGrid;
+  const period = state.schedule.periods[e.p - 1];
+  $('editTitle').textContent = `${state.schedule.days[e.d]} · ${e.p}η ώρα`;
+  const body = $('editBody');
+  body.innerHTML = '';
+
+  const pick = (patch) => {
+    Object.assign(e, { free: false, other: false }, patch);
+    if (e.other) Object.assign(e, { teacher: '', room: '', group: '' });
+    else if (!e.free) Object.assign(e, lessonDefaults(base, e.orig, e.subject));
+    renderEditSheet();
+  };
+  const on = (subject) => !e.free && !e.other && e.subject === subject;
+  const { own, week } = editChoices(base, e.orig);
+
+  const said = e.orig ? [e.orig.subject, ...teachers(e.orig)].join(' · ') : 'Κενό';
+  const ownChips = own.map((s) => chip({ text: s, on: on(s), onClick: () => pick({ subject: s }) }));
+  const free = chip({ text: 'Κενό', on: e.free, onClick: () => pick({ free: true }) });
+  if (e.orig) ownChips.push(free); else ownChips.unshift(free);
+  ownChips.push(chip({ text: 'Άλλο…', on: e.other, onClick: () => {
+    pick({ other: true });
+    const input = $('editOther');
+    if (input && input.focus) input.focus();
+  } }));
+  body.appendChild(field('Τι έχεις αυτή την ώρα;',
+    `Στο πρόγραμμα (${period.start}–${period.end}): ${said}`, ownChips));
+
+  if (e.other) {
+    const input = textInput('editOther', 'Όνομα μαθήματος', e.otherText, (value) => {
+      e.otherText = value;
+      finishEdit();
+    });
+    body.appendChild(input);
+  }
+
+  if (week.length) {
+    body.appendChild(field('Ή ένα από τα μαθήματά σου', null,
+      week.map((s) => chip({ text: s, on: on(s), onClick: () => pick({ subject: s }) }))));
+  }
+
+  // Teacher and room, for the few who want them: closed unless opened.
+  if (!e.free) {
+    const more = document.createElement('details');
+    more.className = 'more';
+    more.open = !!e.advanced;
+    more.innerHTML = '<summary>Προχωρημένα: καθηγητής και αίθουσα</summary>';
+    more.addEventListener('toggle', () => { e.advanced = more.open; });
+    more.appendChild(textInput('editTeacher', 'Καθηγητής', e.teacher,
+      (value) => { e.teacher = value; }, true));
+    more.appendChild(textInput('editRoom', 'Αίθουσα', e.room,
+      (value) => { e.room = value; }, true));
+    body.appendChild(more);
+  }
+  finishEdit();
+}
+
+/** A labelled text box. Not re-rendered while typed in: rebuilding the sheet
+    would pull the field out from under the keyboard. */
+function textInput(id, label, value, onInput, labelled) {
+  const wrap = document.createElement('label');
+  wrap.className = 'text-field';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = id;
+  input.className = 'text-input';
+  input.maxLength = 60;
+  input.value = value || '';
+  input.autocomplete = 'off';
+  input.setAttribute('aria-label', label);
+  if (labelled) {
+    const name = document.createElement('span');
+    name.textContent = label;
+    wrap.appendChild(name);
+  } else {
+    input.placeholder = label;
+  }
+  input.addEventListener('input', () => onInput(input.value));
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function finishEdit() {
+  const e = state.edit;
+  $('editSave').disabled = e.other && !e.otherText.trim();
+  $('editReset').hidden = !e.existing;
+}
+
+function saveEdit() {
+  const e = state.edit;
+  if (!e || !state.selection || (e.other && !e.otherText.trim())) return;
+  const change = changeFromEdit(e, state.baseGrid);
+  const mine = classChanges(state.selection.section, true);
+  if (change) mine[hourKey(e.d, e.p)] = change;
+  else delete mine[hourKey(e.d, e.p)];
+  storeChanges();
+  $('editSheet').close();
+  render();
+}
+
+function resetEdit() {
+  const e = state.edit;
+  if (!e || !state.selection) return;
+  delete classChanges(state.selection.section)[hourKey(e.d, e.p)];
+  storeChanges();
+  $('editSheet').close();
+  render();
 }
 
 function finishPicker(hint) {
@@ -1361,11 +1808,14 @@ function offerSchedule(candidate) {
   // the import of it has been corrected. Saying «νέο πρόγραμμα» next to a
   // version the student can already see in the footer just reads as a bug.
   const corrected = String(candidate.version) === String(state.schedule.version);
+  // Said before the tap, not only after: taking it wipes them.
+  const losing = state.selection && Object.keys(classChanges(state.selection.section)).length
+    ? ' Οι αλλαγές σου θα σβηστούν.' : '';
   banner({
     id: 'newdata',
-    text: corrected
+    text: (corrected
       ? 'Διορθωμένο πρόγραμμα — υπάρχει ενημερωμένη έκδοση των ίδιων ωρών.'
-      : `Νέο πρόγραμμα (έκδοση ${candidate.version}).`,
+      : `Νέο πρόγραμμα (έκδοση ${candidate.version}).`) + losing,
     actionText: 'Ενημέρωση',
     onAction: () => applySchedule(candidate),
   });
@@ -1389,6 +1839,18 @@ function offerPendingSchedule() {
 }
 
 function applySchedule(schedule) {
+  // The student's changes were made on the old hours, so they go with them —
+  // a correction included, since that can move hours too. What this class
+  // had is kept in memory as a reminder for putting them back.
+  const old = state.schedule;
+  const had = state.selection ? classChanges(state.selection.section) : {};
+  state.recall = Object.keys(had).map((key) => {
+    const [d, p] = key.split('-').map(Number);
+    return { d, p, day: old.days[d] || '', subject: had[key].free ? 'Κενό' : had[key].subject };
+  }).sort((a, b) => a.d - b.d || a.p - b.p);
+  state.changes = {};
+  localStorage.removeItem(KEY_CHANGES);
+
   state.schedule = schedule;
   save(KEY_SCHEDULE, schedule);
   save(KEY_DISMISSED, stamp(schedule));
@@ -1397,6 +1859,7 @@ function applySchedule(schedule) {
   const pruned = pruneSelection(state.selection, schedule);
   if (!pruned) {
     state.selection = null;
+    state.recall = null;   // they were for a class that no longer exists
     banner({ id: 'repick', tone: 'warn', text: 'Το τμήμα σου άλλαξε στο νέο πρόγραμμα — διάλεξε ξανά.' });
     openPicker();
     return;
@@ -1406,6 +1869,15 @@ function applySchedule(schedule) {
   save(KEY_SELECTION, pruned);
   if (lostSomething) {
     banner({ id: 'partial', tone: 'warn', text: 'Κάποιες ομάδες δεν υπάρχουν πια — έλεγξε τις επιλογές σου.' });
+  }
+  if (state.recall.length) {
+    banner({
+      id: 'changes',
+      tone: 'warn',
+      text: 'Το πρόγραμμα άλλαξε, οπότε οι αλλαγές σου σβήστηκαν — βάλ’ τες ξανά αν ισχύουν ακόμα.',
+      actionText: 'Αλλαγές',
+      onAction: () => setEditing(true),
+    });
   }
   render();
 }
@@ -1522,13 +1994,16 @@ function wire() {
   $('themeClose').addEventListener('click', () => $('themeSheet').close());
   $('iosClose').addEventListener('click', () => $('iosSheet').close());
 
-  $('pickerSave').addEventListener('click', () => {
-    if (!state.draft.section) return;
-    state.selection = state.draft;
-    save(KEY_SELECTION, state.selection);
-    $('picker').close();
-    render();
-  });
+  $('pickerSave').addEventListener('click', commitPicker);
+
+  $('editDone').addEventListener('click', () => setEditing(false));
+  $('editClose').addEventListener('click', () => $('editSheet').close());
+  $('editSave').addEventListener('click', saveEdit);
+  $('editReset').addEventListener('click', resetEdit);
+  for (const id of ['todayList', 'weekList', 'weekGrid']) {
+    $(id).addEventListener('click', onSlotTap);
+    $(id).addEventListener('keydown', onSlotTap);
+  }
 
   // Closing the picker with Esc or the backdrop must not leave a blank app.
   $('picker').addEventListener('close', () => {
@@ -1612,6 +2087,7 @@ async function start() {
   $('loadError').hidden = true;
 
   state.selection = pruneSelection(load(KEY_SELECTION, null), state.schedule);
+  state.changes = loadChanges(state.schedule);
 
   if (!state.selection) {
     openPicker();

@@ -294,6 +294,20 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 .tag--next { background: var(--accent-soft); color: var(--accent-ink); }
 .tag--warn { background: var(--warn-bg); color: var(--warn); }
 
+/* The student's own change: a bar down the side, and a line saying what the
+   timetable has instead. */
+.slot--changed { box-shadow: inset 3px 0 0 var(--accent); }
+
+/* Edit mode: every hour shows it can be tapped. */
+.is-editing .slot { position: relative; cursor: pointer; }
+.is-editing .slot__body { padding-right: 18px; }
+.is-editing .slot::after {
+  content: "✎";
+  position: absolute; top: 9px; right: 12px;
+  color: var(--accent-ink); font-size: .95rem;
+}
+.is-editing table.grid tbody td { cursor: pointer; border-style: dashed; }
+
 .conflict {
   margin-top: 8px;
   padding: 8px 10px;
@@ -368,6 +382,8 @@ table.grid th.is-picked, table.grid td.is-picked { background: var(--surface-2);
 table.grid thead th.is-picked { box-shadow: inset 0 -3px 0 var(--accent); }
 table.grid td.is-now { background: var(--now-bg); outline: 2px solid var(--now-edge); outline-offset: -2px; }
 table.grid td.is-conflict { background: var(--warn-bg); }
+table.grid td.is-changed .grid__subject::after { content: " ✎"; color: var(--accent-ink); font-weight: 500; }
+.grid__free { color: var(--muted); font-weight: 500; }
 .grid__subject { font-weight: 600; }
 .grid__teacher { color: var(--muted); font-size: .92em; }
 .grid__room { color: var(--muted); font-size: .92em; }
@@ -397,6 +413,68 @@ table.grid td.is-conflict { background: var(--warn-bg); }
   background: transparent; color: var(--muted); cursor: pointer;
 }
 .banner--warn { background: var(--warn-bg); color: var(--warn); }
+
+/* -------------------------------------------------------------- edit mode */
+
+.editbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px var(--pad);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: .86rem;
+  border-bottom: 1px solid var(--border);
+}
+.editbar p { flex: 1; min-width: 0; }
+.editbar__done {
+  padding: 6px 14px; border: 0; border-radius: 999px;
+  background: var(--accent); color: var(--accent-text);
+  font: inherit; font-size: .84rem; font-weight: 600; cursor: pointer;
+}
+
+/* What the student had before a new timetable wiped it. */
+.recall {
+  margin-bottom: var(--gap);
+  padding: 10px 14px;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  font-size: .86rem;
+}
+.recall ul { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
+
+.changes { display: flex; flex-direction: column; gap: 6px; margin-top: 9px; }
+.change {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 8px 8px 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: .9rem;
+}
+.change p { flex: 1; min-width: 0; }
+.change small { display: block; font-size: .78rem; color: var(--muted); }
+.change__del {
+  flex: none; padding: 6px 9px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); cursor: pointer; font: inherit;
+}
+.changes__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+
+.more summary { cursor: pointer; font-size: .86rem; font-weight: 550; color: var(--accent-ink); }
+.more[open] summary { margin-bottom: 8px; }
+.more .text-field + .text-field { margin-top: 8px; }
+.text-field { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; color: var(--muted); }
+/* 16px, or iOS zooms the whole page in when the field is tapped. */
+.text-input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit; font-size: 1rem;
+}
+.sheet__foot--row { display: flex; gap: 10px; }
+.sheet__foot--row .ghost-btn { flex: none; }
+.sheet__foot--row .primary-btn { flex: 1; width: auto; }
 
 /* ----------------------------------------------------------------- footer */
 

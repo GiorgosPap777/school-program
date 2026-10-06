@@ -65,6 +65,10 @@
   <button type="button" class="tabs__btn" role="tab" data-view="week"
           id="tab-week" aria-selected="false" aria-controls="view-week">Εβδομάδα</button>
 </nav>
+<div id="editBar" class="editbar" hidden>
+  <p>✎ Πάτα ένα μάθημα για να το αλλάξεις.</p>
+  <button type="button" id="editDone" class="editbar__done">Τέλος</button>
+</div>
 </div>
 
 <main id="main" class="main">
@@ -73,6 +77,8 @@
     <p id="loadErrorText"></p>
     <button type="button" id="retryBtn" class="primary-btn">Δοκίμασε ξανά</button>
   </div>
+
+  <div id="editRecall" class="recall" hidden></div>
 
   <section id="view-today" class="view" role="tabpanel" aria-labelledby="tab-today">
     <div id="statusCard" class="status"></div>
@@ -110,6 +116,23 @@
       <button type="button" id="pickerSave" class="primary-btn">Αποθήκευση</button>
     </div>
   </form>
+</dialog>
+
+<!-- One hour of the student's own changes -->
+<dialog id="editSheet" class="sheet" aria-labelledby="editTitle">
+  <div class="sheet__inner">
+    <div class="sheet__bar">
+      <h2 id="editTitle">Αλλαγή ώρας</h2>
+      <button type="button" id="editClose" class="icon-btn" aria-label="Κλείσιμο">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="sheet__body" id="editBody"></div>
+    <div class="sheet__foot sheet__foot--row">
+      <button type="button" id="editReset" class="ghost-btn" hidden>Επαναφορά</button>
+      <button type="button" id="editSave" class="primary-btn">Αποθήκευση</button>
+    </div>
+  </div>
 </dialog>
 
 <!-- Colour theme -->
