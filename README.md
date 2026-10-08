@@ -437,18 +437,34 @@ Each one also records what the hour held (`was`). It is only drawn over that
 lesson, so after picking a different orientation, a change to one of its hours
 just stops applying rather than landing on another subject.
 
-**A new timetable wipes them**, a correction included, since either can move
-hours. The «Νέο πρόγραμμα» banner warns first, and says they are not lost
-without a trace («Οι δικές σου αλλαγές θα σβηστούν, αλλά θα σου δείξουμε ποιες
-ήταν.»), so the update is not put off to keep them. After the update, a banner
-says «Ήρθε νέο πρόγραμμα» (or «Το πρόγραμμα διορθώθηκε») and that they were
-removed, and offers «Δες τες». That opens edit mode with the list of what the
-student had, in the words of the settings list. The list is saved
-(`gel7.recall.v1`), so it survives the app being closed before it was looked at.
-It goes when edit mode is left with «Τέλος», or when its banner is dismissed
-with ✕. Carrying changes over by hour number would put a «Λογοτεχνία» on
-whatever lands in that hour next. A change saved against a different timetable
-stamp is ignored on load, so no other path can bring one back either.
+**A new timetable keeps a change only if its hour is unchanged.** A change was
+made against what the school had in that hour. If the new timetable (or a
+correction) has exactly the same thing there (lesson, teachers, room, group),
+the change still means what it meant, so it stays and is stored again under the
+new timetable's stamp. If anything about that hour is different, the change is
+dropped. Carrying it over would put a «Λογοτεχνία» on whatever lands in that
+hour now. This is checked only for the class that is picked; other classes'
+changes are dropped, because there is no saved choice of groups to check them
+against. A change saved against a different timetable stamp is still ignored on
+load, so nothing bypasses this check.
+
+The student is told what happened before and after, so that ✎ marks surviving
+an update, or vanishing from some hours only, don't look like a bug:
+
+- **Before**, the «Νέο πρόγραμμα» banner says what the update will do: «Οι
+  αλλαγές σου μένουν, γιατί οι ώρες τους δεν αλλάζουν», «Μία από τις αλλαγές
+  σου θα σβηστεί, γιατί αλλάζει η ώρα της — θα σου δείξουμε ποια. Οι υπόλοιπες
+  μένουν», or that all of them go. That also keeps the update from being put
+  off to hold on to them.
+- **After**, «Ήρθε νέο πρόγραμμα» (or «Το πρόγραμμα διορθώθηκε») says the same in
+  the past tense. When something was dropped, the banner offers «Δες τες»,
+  which opens edit mode with the dropped changes listed, each with what its hour
+  holds now («στο νέο πρόγραμμα: Μαθηματικά», «…: αίθουσα 12»), and «Οι
+  υπόλοιπες κρατήθηκαν» when some stayed.
+
+The list is saved (`gel7.recall.v1`), so it survives the app being closed
+before it was looked at. It goes when edit mode is left with «Τέλος», or when
+its banner is dismissed with ✕.
 
 In the week grid an unchanged combined hour reads «Γλ./Λογ.» (`subjectShort`
 in `tools/aliases.json`), not plain «Γλώσσα», so it is not mistaken for an hour

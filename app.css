@@ -442,6 +442,7 @@ table.grid td.is-changed .grid__subject::after { content: " ✎"; color: var(--a
 }
 .recall ul { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
 .recall small { display: block; font-size: .78rem; color: var(--muted); }
+.recall__kept { margin-top: 6px; color: var(--muted); }
 
 .myclass {
   display: flex; flex-direction: column; align-items: flex-start; gap: 3px;

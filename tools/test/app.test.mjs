@@ -766,78 +766,6 @@ await test('the day list marks a change and keeps a row for an emptied last hour
   state.marks = new Map();
 });
 
-await test('a new timetable warns before it wipes the changes, then asks for them back', async () => {
-  const hour = combinedHour();
-  const real = JSON.parse(SCHEDULE_TEXT);
-  const newer = { ...JSON.parse(SCHEDULE_TEXT), version: '2099-01-01', generatedAt: '2099-01-01T00:00:00Z' };
-  const shown = document.getElementById('banners').children;
-  const text = (id) => (shown.find((b) => b.dataset.banner === id) || {}).innerHTML || '';
-  storage.clear();
-  shown.length = 0;
-  state.schedule = real;
-  state.selection = { grade: hour.grade, section: hour.section, track: null, kontra: null, extras: [] };
-  const [first] = app('halves')(hour.lesson.subject);
-  state.changes = { [hour.section]: { [`${hour.d}-${hour.p}`]: {
-    subject: first, teacher: '', room: '', group: '', was: hour.lesson.subject } } };
-  app('storeChanges')();
-
-  app('offerSchedule')(newer);
-  // Warned, and told they are not lost for good — or the update gets put off.
-  assert.match(text('newdata'), /δικές σου αλλαγές θα σβηστούν, αλλά θα σου δείξουμε ποιες ήταν/);
-  app('applySchedule')(newer);
-  vm.runInContext('clearTimeout(tickTimer)', sandbox);
-  assert.deepEqual({ ...state.changes }, {});
-  assert.equal(storage.has(app('KEY_CHANGES')), false, 'the old changes are still stored');
-  assert.match(text('changes'), /^<p>Ήρθε νέο πρόγραμμα, οπότε οι αλλαγές σου σβήστηκαν/);
-  const reminder = [{ when: `${real.days[hour.d]} ${hour.p}η`, what: first, how: `αντί για ${hour.lesson.subject}` }];
-  assert.deepEqual(JSON.parse(JSON.stringify(state.recall.items)), reminder);
-  // It outlives closing the app, for this class only.
-  assert.deepEqual(JSON.parse(JSON.stringify(app('loadRecall')().items)), reminder);
-  // Waved away, it is gone for good.
-  const bar = shown.find((b) => b.dataset.banner === 'changes');
-  bar.children.find((c) => c.className === 'banner__dismiss').on.click();
-  assert.equal(state.recall, null);
-  assert.equal(storage.has(app('KEY_RECALL')), false, 'a dismissed reminder is still stored');
-  // Nothing to warn about without changes.
-  shown.length = 0;
-  app('offerSchedule')({ ...newer, version: '2099-02-01' });
-  assert.doesNotMatch(text('newdata'), /αλλαγές/);
-  shown.length = 0;
-  storage.clear();
-});
-
-await test('a corrected timetable says so, and the reminder goes once it has been seen', async () => {
-  const hour = combinedHour();
-  const real = JSON.parse(SCHEDULE_TEXT);
-  const shown = document.getElementById('banners').children;
-  storage.clear();
-  shown.length = 0;
-  state.schedule = real;
-  state.selection = { grade: hour.grade, section: hour.section, track: null, kontra: null, extras: [] };
-  state.changes = { [hour.section]: { [`${hour.d}-${hour.p}`]: { free: true, was: hour.lesson.subject } } };
-  app('applySchedule')({ ...real, generatedAt: '2099-01-01T00:00:00Z' });
-  vm.runInContext('clearTimeout(tickTimer)', sandbox);
-  const bar = shown.find((b) => b.dataset.banner === 'changes');
-  assert.match(bar.innerHTML, /^<p>Το πρόγραμμα διορθώθηκε,/);
-  // Another class picked since: not this one's reminder.
-  state.selection = { ...state.selection, section: 'κανένα' };
-  assert.equal(app('loadRecall')(), null);
-  assert.equal(storage.has(app('KEY_RECALL')), false);
-  // «Δες τες» opens edit mode with the list; leaving it is done with it.
-  state.selection = { grade: hour.grade, section: hour.section, track: null, kontra: null, extras: [] };
-  state.recall = { section: hour.section, corrected: true, items: [{ when: 'Δευτέρα 1η', what: 'Κενό', how: '' }] };
-  storage.set(app('KEY_RECALL'), JSON.stringify(state.recall));
-  bar.children.find((c) => c.className === 'banner__act').on.click();
-  assert.equal(state.editing, true);
-  assert.match(document.getElementById('editRecall').innerHTML, /Δευτέρα 1η<\/strong> · Κενό/);
-  app('setEditing')(false);
-  vm.runInContext('clearTimeout(tickTimer)', sandbox);
-  assert.equal(state.recall, null);
-  assert.equal(storage.has(app('KEY_RECALL')), false);
-  shown.length = 0;
-  storage.clear();
-});
-
 /** Three Φυσική hours with one teacher — one of them in the lab, one with a
     second teacher beside them — and a Ιστορία on its own. */
 const LAB = {
@@ -946,6 +874,123 @@ await test('«και στις άλλες ώρες» changes every hour of the le
   state.changes = {};
   app('setEditing')(false);
   vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  storage.clear();
+});
+
+/** LAB as a later timetable, with `edit` applied to its lessons. */
+function laterLab(edit, version = 'lab2') {
+  const next = JSON.parse(JSON.stringify(LAB));
+  Object.assign(next, { version, generatedAt: '2099-01-01T00:00:00Z' });
+  if (edit) edit(next.groups.Χ1.lessons);
+  return next;
+}
+
+/** Two changes on LAB — Monday's Φυσική in another room, Wednesday's Ιστορία
+    made free — then `next` offered and taken. What each banner said. */
+function updateWith(next) {
+  const shown = document.getElementById('banners').children;
+  const text = (id) => (shown.find((b) => b.dataset.banner === id) || {}).innerHTML || '';
+  storage.clear();
+  shown.length = 0;
+  state.schedule = JSON.parse(JSON.stringify(LAB));
+  state.selection = LAB_SEL;
+  state.recall = null;
+  state.changes = { Χ1: {
+    '0-1': { subject: 'Φυσική', teacher: 'Παπαδόπουλος', room: 'Αμφιθέατρο', group: 'Χ1', was: 'Φυσική' },
+    '2-1': { free: true, was: 'Ιστορία' },
+  } };
+  app('storeChanges')();
+  app('offerSchedule')(next);
+  const before = text('newdata');
+  shown.length = 0;
+  app('applySchedule')(next);
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  return { before, after: text('changes'), shown };
+}
+const keptKeys = () => Object.keys(state.changes.Χ1 || {}).sort();
+
+await test('a new timetable keeps a change whose hour it leaves as it was, and says so', async () => {
+  const next = laterLab();
+  const { before, after } = updateWith(next);
+  assert.match(before, /Οι αλλαγές σου μένουν, γιατί οι ώρες τους δεν αλλάζουν/);
+  assert.match(after, /^<p>Ήρθε νέο πρόγραμμα\. Οι αλλαγές σου κρατήθηκαν, γιατί οι ώρες τους έμειναν ίδιες/);
+  assert.deepEqual(keptKeys(), ['0-1', '2-1']);
+  // Stored against the new timetable, so the next start still has them.
+  assert.deepEqual(Object.keys(app('loadChanges')(next).Χ1).sort(), ['0-1', '2-1']);
+  assert.equal(state.recall, null);
+  assert.equal(storage.has(app('KEY_RECALL')), false);
+  // And they are drawn: the room is still the student's.
+  assert.equal(state.grid[0][0].room, 'Αμφιθέατρο');
+  assert.equal(state.grid[2][0], null);
+  storage.clear();
+});
+
+await test('a new timetable drops only the changes whose hour is different now, and says why', async () => {
+  const next = laterLab((lessons) => { lessons.find((l) => l.subject === 'Ιστορία').subject = 'Μαθηματικά'; });
+  const { before, after, shown } = updateWith(next);
+  assert.match(before, /Μία από τις αλλαγές σου θα σβηστεί, γιατί αλλάζει η ώρα της — θα σου δείξουμε ποια\. Οι υπόλοιπες μένουν/);
+  assert.match(after, /^<p>Ήρθε νέο πρόγραμμα\. Μία αλλαγή σου σβήστηκε, γιατί η ώρα της είναι πια διαφορετική· οι υπόλοιπες κρατήθηκαν/);
+  assert.deepEqual(keptKeys(), ['0-1']);
+  const reminder = [{ when: 'Τετάρτη 1η', what: 'Κενό', how: 'αντί για Ιστορία', now: 'στο νέο πρόγραμμα: Μαθηματικά' }];
+  assert.deepEqual(JSON.parse(JSON.stringify(state.recall.items)), reminder);
+  assert.equal(state.recall.kept, 1);
+  // It outlives closing the app, for this class only.
+  assert.deepEqual(JSON.parse(JSON.stringify(app('loadRecall')().items)), reminder);
+  state.selection = { ...LAB_SEL, section: 'κανένα' };
+  assert.equal(app('loadRecall')(), null);
+  state.selection = LAB_SEL;
+  // In edit mode: what went, why, and that the rest stayed.
+  app('setEditing')(true);
+  const box = document.getElementById('editRecall').innerHTML;
+  assert.match(box, /σβήστηκαν, γιατί στο νέο πρόγραμμα οι ώρες τους είναι διαφορετικές/);
+  assert.match(box, /<small>στο νέο πρόγραμμα: Μαθηματικά<\/small>/);
+  assert.match(box, /Οι υπόλοιπες κρατήθηκαν/);
+  app('setEditing')(false);
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  assert.equal(state.recall, null, 'leaving edit mode kept the reminder');
+  assert.equal(storage.has(app('KEY_RECALL')), false);
+  shown.length = 0;
+  storage.clear();
+});
+
+await test('a correction that moves a teacher or a room drops what was made on it, and waving it away forgets', async () => {
+  // Same version: the import was corrected. A new teacher on Monday's
+  // Φυσική and a room for Ιστορία make both hours different.
+  const next = laterLab((lessons) => {
+    lessons.find((l) => l.d === 0 && l.p === 1).teacher = 'Νικολάου';
+    lessons.find((l) => l.subject === 'Ιστορία').room = 'ΕΦ';
+  }, LAB.version);
+  const { before, after, shown } = updateWith(next);
+  assert.match(before, /Οι ώρες που είχες αλλάξει αλλάζουν, οπότε οι αλλαγές σου θα σβηστούν — θα σου δείξουμε ποιες ήταν/);
+  assert.match(after, /^<p>Το πρόγραμμα διορθώθηκε\. Οι ώρες που είχες αλλάξει είναι πια διαφορετικές/);
+  assert.deepEqual({ ...state.changes }, {});
+  assert.equal(storage.has(app('KEY_CHANGES')), false);
+  assert.deepEqual(Array.from(state.recall.items, (r) => r.now),
+    ['στο νέο πρόγραμμα: καθηγητής Νικολάου', 'στο νέο πρόγραμμα: αίθουσα Εργ. Φυσικής']);
+  const bar = shown.find((b) => b.dataset.banner === 'changes');
+  bar.children.find((c) => c.className === 'banner__dismiss').on.click();
+  assert.equal(state.recall, null);
+  assert.equal(storage.has(app('KEY_RECALL')), false, 'a dismissed reminder is still stored');
+  shown.length = 0;
+  storage.clear();
+});
+
+await test('«Δες τες» opens edit mode on the reminder; with no changes nothing is said about them', async () => {
+  const next = laterLab((lessons) => { lessons.forEach((l) => { l.subject += ' Ι'; }); });
+  const { shown } = updateWith(next);
+  const bar = shown.find((b) => b.dataset.banner === 'changes');
+  bar.children.find((c) => c.className === 'banner__act').on.click();
+  assert.equal(state.editing, true);
+  assert.match(document.getElementById('editRecall').innerHTML, /Δευτέρα 1η<\/strong> · Φυσική/);
+  assert.doesNotMatch(document.getElementById('editRecall').innerHTML, /υπόλοιπες/);
+  app('setEditing')(false);
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  // Nothing to warn about without changes.
+  shown.length = 0;
+  state.changes = {};
+  app('offerSchedule')(laterLab(null, 'lab3'));
+  assert.doesNotMatch(shown[0].innerHTML, /αλλαγές/);
+  shown.length = 0;
   storage.clear();
 });
 

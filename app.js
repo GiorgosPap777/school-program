@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.13.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -51,8 +51,8 @@ const state = {
   // The ⚙ sheet: 'summary' of a saved class (and what else lives there), or
   // 'class' for picking one. See openPicker().
   pickerMode: 'class',
-  // What the student had changed before a new timetable wiped it, as a
-  // reminder: { section, corrected, items: changeRows() }. See applySchedule().
+  // The changes a new timetable wiped, as a reminder: { section, lead (what
+  // happened), kept (how many stayed), items }. See applySchedule().
   recall: null,
   conflicts: [],
   view: 'today',
@@ -709,6 +709,73 @@ function changeRows(base, changes) {
   return rows;
 }
 
+/** Run `fn` as if `schedule` were the one loaded: the room and the day names
+    a lesson is described with come from it. */
+function withSchedule(schedule, fn) {
+  const was = state.schedule;
+  state.schedule = schedule;
+  try { return fn(); } finally { state.schedule = was; }
+}
+
+/** An hour of the school's timetable as the student sees it — lesson,
+    teachers, room — so two timetables can be asked whether it is the same. */
+function hourPrint(lesson) {
+  return lesson
+    ? JSON.stringify([lesson.subject, teachers(lesson), lessonRoom(lesson), lesson.group || ''])
+    : '';
+}
+
+/** What the new timetable has in an hour, said against what the old one had:
+    another lesson, or the same one with another teacher or room. */
+function hourNow(before, after) {
+  if (!after.lesson || !before.lesson || after.lesson.subject !== before.lesson.subject) {
+    return `στο νέο πρόγραμμα: ${after.lesson ? after.lesson.subject : 'Κενό'}`;
+  }
+  const parts = [];
+  const t0 = teachers(before.lesson).join(', '), t1 = teachers(after.lesson).join(', ');
+  if (t0 !== t1) parts.push(`καθηγητής ${t1 || '—'}`);
+  if (before.room !== after.room) parts.push(`αίθουσα ${after.room || '—'}`);
+  return parts.length ? `στο νέο πρόγραμμα: ${parts.join(', ')}` : 'στο νέο πρόγραμμα άλλαξε αυτή η ώρα';
+}
+
+/** Which of a class's changes a new timetable leaves standing. A change was
+    made against what the school had in that hour; if the new timetable has
+    exactly that there still — same lesson, teachers, room — the change still
+    means what it meant, and wiping it would only make the student redo it.
+    If the hour is different, the change is dropped, and said in words (with
+    what the hour holds now) for the reminder. `from` and `to` are
+    { schedule, selection }; a `to` with no selection — the class is gone —
+    keeps nothing. */
+function carryChanges(changes, from, to) {
+  const keys = Object.keys(changes);
+  const look = (side) => withSchedule(side.schedule, () => {
+    const base = buildGrid(side.schedule, side.selection).grid;
+    const hours = {};
+    for (const key of keys) {
+      const [d, p] = key.split('-').map(Number);
+      const lesson = (base[d] && base[d][p - 1]) || null;
+      hours[key] = { lesson, print: hourPrint(lesson), room: lessonRoom(lesson) };
+    }
+    return { base, hours };
+  });
+  const before = look(from);
+  const after = to.selection ? look(to) : null;
+  const kept = {}, dropped = {};
+  for (const key of keys) {
+    const same = after && before.hours[key].print === after.hours[key].print;
+    (same ? kept : dropped)[key] = changes[key];
+  }
+  const rows = withSchedule(from.schedule, () => changeRows(before.base, dropped))
+    .map((row) => {
+      const nows = after ? [...new Set(row.keys.map((k) => hourNow(before.hours[k], after.hours[k])))] : [];
+      return { when: row.when, what: row.what, how: row.how,
+        now: nows.length === 1 ? nows[0] : 'στο νέο πρόγραμμα άλλαξαν αυτές οι ώρες' };
+    });
+  const keptRows = after && Object.keys(kept).length
+    ? withSchedule(to.schedule, () => changeRows(after.base, kept)).length : 0;
+  return { kept, rows, keptRows };
+}
+
 /* --------------------------------------------------------------- clock status */
 
 /** Where the wall clock sits relative to today's periods. */
@@ -1344,7 +1411,8 @@ function commitPicker() {
 /** A row of changeRows(), for the settings list and the reminder alike. */
 function changeRowHtml(row) {
   return `<strong>${esc(row.when)}</strong>${row.what ? ` · ${esc(row.what)}` : ''}`
-    + (row.how ? `<small>${esc(row.how)}</small>` : '');
+    + (row.how ? `<small>${esc(row.how)}</small>` : '')
+    + (row.now ? `<small>${esc(row.now)}</small>` : '');
 }
 
 /** «Δικές σου αλλαγές»: the way into edit mode, and every change this class
@@ -1355,7 +1423,7 @@ function changesField(draft) {
   wrap.className = 'field';
   wrap.innerHTML = '<p class="field__label">Δικές σου αλλαγές</p>'
     + '<p class="field__note">Για ώρες που δεν είναι όπως στο πρόγραμμα του σχολείου.'
-    + ' Μένουν μόνο σε αυτό το κινητό και σβήνονται όταν βγει νέο πρόγραμμα.</p>';
+    + ' Μένουν μόνο σε αυτό το κινητό. Με νέο πρόγραμμα κρατιούνται όσες ώρες έμειναν ίδιες.</p>';
 
   const mine = classChanges(draft.section);
   // Measured against the class as it stands in the picker, which may not be
@@ -1434,9 +1502,11 @@ function renderEditing() {
     ? r.items : [];
   recall.hidden = !items.length;
   recall.innerHTML = items.length
-    ? `<p>Στο προηγούμενο πρόγραμμα είχες βάλει:</p><ul>`
+    ? '<p>Αυτές οι αλλαγές σου σβήστηκαν, γιατί στο νέο πρόγραμμα οι ώρες τους είναι διαφορετικές:</p><ul>'
       + items.map((row) => `<li>${changeRowHtml(row)}</li>`).join('')
       + '</ul>'
+      + (r.kept ? '<p class="recall__kept">Οι υπόλοιπες κρατήθηκαν (έχουν ✎), γιατί οι ώρες τους'
+        + ' έμειναν ίδιες.</p>' : '')
     : '';
 }
 
@@ -2035,11 +2105,28 @@ function offerSchedule(candidate) {
   // the import of it has been corrected. Saying «νέο πρόγραμμα» next to a
   // version the student can already see in the footer just reads as a bug.
   const corrected = String(candidate.version) === String(state.schedule.version);
-  // Said before the tap, not only after: taking it wipes them. And said so
-  // the tap is not put off for their sake — they are not lost for good, and
-  // an old timetable kept to hold on to them is far worse.
-  const losing = state.selection && Object.keys(classChanges(state.selection.section)).length
-    ? ' Οι δικές σου αλλαγές θα σβηστούν, αλλά θα σου δείξουμε ποιες ήταν.' : '';
+  // Said before the tap, not only after: what the update does to the
+  // student's changes. And said so the tap is not put off for their sake —
+  // what goes is shown again, and an old timetable kept to hold on to it is
+  // far worse.
+  const had = state.selection ? classChanges(state.selection.section) : {};
+  let losing = '';
+  if (Object.keys(had).length) {
+    const { rows, keptRows } = carryChanges(had, { schedule: state.schedule, selection: state.selection },
+      { schedule: candidate, selection: pruneSelection(state.selection, candidate) });
+    if (!rows.length) {
+      losing = ' Οι αλλαγές σου μένουν, γιατί οι ώρες τους δεν αλλάζουν.';
+    } else if (!keptRows) {
+      losing = ' Οι ώρες που είχες αλλάξει αλλάζουν, οπότε οι αλλαγές σου θα σβηστούν —'
+        + ' θα σου δείξουμε ποιες ήταν.';
+    } else if (rows.length === 1) {
+      losing = ' Μία από τις αλλαγές σου θα σβηστεί, γιατί αλλάζει η ώρα της —'
+        + ' θα σου δείξουμε ποια. Οι υπόλοιπες μένουν.';
+    } else {
+      losing = ` ${rows.length} από τις αλλαγές σου θα σβηστούν, γιατί αλλάζουν οι ώρες τους —`
+        + ' θα σου δείξουμε ποιες. Οι υπόλοιπες μένουν.';
+    }
+  }
   banner({
     id: 'newdata',
     text: (corrected
@@ -2068,32 +2155,35 @@ function offerPendingSchedule() {
 }
 
 function applySchedule(schedule) {
-  // The student's changes were made on the old hours, so they go with them —
-  // a correction included, since that can move hours too. What this class
-  // had is kept in memory as a reminder for putting them back.
-  // Put in words now, against the old week, while there still is one.
+  // The student's changes go through carryChanges(): one stays when the new
+  // timetable has the very same lesson in its hour, and goes when it does
+  // not. Other classes' changes go — there is no saved choice of groups to
+  // check them against. What went is put in words now, against the old week,
+  // while there still is one.
   const old = state.schedule;
-  const had = state.selection ? classChanges(state.selection.section) : {};
-  const items = Object.keys(had).length
-    ? changeRows(buildGrid(old, state.selection).grid, had) : [];
+  const oldSelection = state.selection;
+  const had = oldSelection ? classChanges(oldSelection.section) : {};
+  const pruned = pruneSelection(oldSelection, schedule);
+  const carried = Object.keys(had).length
+    ? carryChanges(had, { schedule: old, selection: oldSelection }, { schedule, selection: pruned })
+    : null;
+  const lead = String(schedule.version) === String(old.version)
+    ? 'Το πρόγραμμα διορθώθηκε' : 'Ήρθε νέο πρόγραμμα';
   // With nothing to remind of, a reminder not yet seen from an earlier
   // timetable is kept: those changes have not been put back either.
-  if (items.length) {
-    state.recall = {
-      section: state.selection.section,
-      corrected: String(schedule.version) === String(old.version),
-      items: items.map(({ when, what, how }) => ({ when, what, how })),
-    };
+  if (carried && carried.rows.length) {
+    state.recall = { section: oldSelection.section, lead, kept: carried.keptRows, items: carried.rows };
   }
-  state.changes = {};
-  localStorage.removeItem(KEY_CHANGES);
 
   state.schedule = schedule;
   save(KEY_SCHEDULE, schedule);
   save(KEY_DISMISSED, stamp(schedule));
   localStorage.removeItem(KEY_PENDING);
+  // Stored again under the new timetable's stamp, or loadChanges() drops them.
+  state.changes = carried && Object.keys(carried.kept).length
+    ? { [oldSelection.section]: carried.kept } : {};
+  storeChanges();
 
-  const pruned = pruneSelection(state.selection, schedule);
   if (!pruned) {
     state.selection = null;
     forgetRecall();   // it was for a class that no longer exists
@@ -2107,9 +2197,14 @@ function applySchedule(schedule) {
   if (lostSomething) {
     banner({ id: 'partial', tone: 'warn', text: 'Κάποιες ομάδες δεν υπάρχουν πια — έλεγξε τις επιλογές σου.' });
   }
-  if (items.length) {
+  if (carried && carried.rows.length) {
     save(KEY_RECALL, state.recall);
     offerRecall();
+  } else if (carried) {
+    // Nothing went. Said anyway, or the ✎ still on the week after «Νέο
+    // πρόγραμμα» looks like the app forgot to update.
+    banner({ id: 'changes',
+      text: `${lead}. Οι αλλαγές σου κρατήθηκαν, γιατί οι ώρες τους έμειναν ίδιες.` });
   }
   render();
 }
@@ -2120,11 +2215,17 @@ function applySchedule(schedule) {
     screen should not lose the list with it. */
 function offerRecall() {
   const r = state.recall;
+  const n = r.items.length;
   banner({
     id: 'changes',
     tone: 'warn',
-    text: (r.corrected ? 'Το πρόγραμμα διορθώθηκε' : 'Ήρθε νέο πρόγραμμα')
-      + ', οπότε οι αλλαγές σου σβήστηκαν. Δες ποιες ήταν και βάλ’ τες ξανά όσες ισχύουν ακόμα.',
+    text: `${r.lead}. `
+      + (!r.kept ? 'Οι ώρες που είχες αλλάξει είναι πια διαφορετικές, οπότε οι αλλαγές σου'
+          + ' σβήστηκαν. Δες ποιες ήταν και βάλ’ τες ξανά όσες ισχύουν ακόμα.'
+        : n === 1 ? 'Μία αλλαγή σου σβήστηκε, γιατί η ώρα της είναι πια διαφορετική·'
+          + ' οι υπόλοιπες κρατήθηκαν. Δες ποια ήταν.'
+        : `${n} αλλαγές σου σβήστηκαν, γιατί οι ώρες τους είναι πια διαφορετικές·`
+          + ' οι υπόλοιπες κρατήθηκαν. Δες ποιες ήταν.'),
     actionText: 'Δες τες',
     onAction: () => setEditing(true),
     onDismiss: forgetRecall,
@@ -2141,14 +2242,14 @@ function loadRecall() {
   const saved = load(KEY_RECALL, null);
   const text = (v) => typeof v === 'string';
   const ok = saved && state.selection && saved.section === state.selection.section
-    && Array.isArray(saved.items) && saved.items.length
-    && saved.items.every((r) => r && text(r.when) && text(r.what) && text(r.how));
+    && text(saved.lead) && Array.isArray(saved.items) && saved.items.length
+    && saved.items.every((r) => r && text(r.when) && text(r.what) && text(r.how) && text(r.now));
   if (!ok) {
     localStorage.removeItem(KEY_RECALL);
     return null;
   }
-  return { section: saved.section, corrected: !!saved.corrected,
-    items: saved.items.map((r) => ({ when: r.when, what: r.what, how: r.how })) };
+  return { section: saved.section, lead: saved.lead, kept: Number(saved.kept) || 0,
+    items: saved.items.map((r) => ({ when: r.when, what: r.what, how: r.how, now: r.now })) };
 }
 
 /* ------------------------------------------------ service worker + install */
