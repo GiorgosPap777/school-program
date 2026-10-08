@@ -277,6 +277,13 @@ hardcoded anywhere — so a new section or orientation next term appears on its 
 the picker offers a θετική student the Ιστορία groups and nothing else. Leave an
 orientation out of that table and it is offered all of them.
 
+Once a class is saved, ⚙ («Ρυθμίσεις») opens on a summary instead: the class in
+a few lines (τμήμα, τάξη, orientation, κόντρα, groups) with an «Αλλαγή τμήματος»
+button that brings up the full picker, followed by «Δικές σου αλλαγές». That
+keeps the changes in view without scrolling past every chip, and leaves room for
+more settings later. With nothing saved yet (first run, or a class that a new
+timetable dropped) ⚙ goes straight to the picker.
+
 ### How the merge works
 
 A Β' or Γ' section's page deliberately leaves periods free for the orientation
@@ -381,9 +388,8 @@ of their own week: the subject, or make it «Κενό», or put a lesson in a fr
 hour.
 
 **Ordinary students see nothing new.** A tap on a lesson does nothing, as it
-always has. The way in is one button at the bottom of the ⚙ sheet, «✎ Αλλαγές
-στο πρόγραμμα», which saves whatever was picked above it and puts the
-timetable into an edit mode. In edit mode a bar under the tabs reads «Πάτα ένα
+always has. The way in is one button in the ⚙ sheet's summary, «✎ Αλλαγές
+στο πρόγραμμα», which puts the timetable into an edit mode. In edit mode a bar under the tabs reads «Πάτα ένα
 μάθημα για να το αλλάξεις», every hour carries a ✎, and the day lists every
 period of the school day, so a lesson can be added after the last. «Τέλος»
 leaves it, and so does closing the app (it is never saved). A switch in
@@ -403,11 +409,27 @@ edited under «Προχωρημένα: καθηγητής και αίθουσα�
 opened. Choosing what the timetable already says removes the change rather than
 saving a copy of it.
 
-A changed hour always says so: a bar down the side and «✎ στο πρόγραμμα:
-Γλώσσα / Λογοτεχνία» under it, and a ✎ in the week grid. That way it is never
-taken for the school's timetable, by the student months later or by whoever
-they show it to. An hour made «Κενό» keeps its row for the same reason. The ⚙
-sheet lists every change for the class, each with a ✕, plus «Σβήσε όλες».
+When the lesson has other hours in the week, the sheet ends with a box: «Και
+στις άλλες 3 ώρες «Φυσική»», with those hours listed under it. Ticked, the save
+(or «Επαναφορά») goes to every hour of that lesson. Only what the student
+actually changed travels: a new teacher for every Φυσική leaves each hour's own
+room alone, so the lab hour stays in the lab. Stored, these are still one change
+per hour. But when every hour of a lesson carries the same change, however it
+got there, it is listed as one («Όλες οι ώρες «Φυσική» (3)», one ✕), and
+opening any of those hours starts with the box ticked. Changing one hour on its
+own afterwards splits it back into hours. A whole lesson made «Κενό» (an
+exemption, say) is the same thing.
+
+A changed hour always says so: a bar down the side, a line under it, and a ✎ in
+the week grid. That way it is never taken for the school's timetable, by the
+student months later or by whoever they show it to. The line says what the
+timetable has instead, and only the part that differs: «✎ στο πρόγραμμα:
+Γλώσσα / Λογοτεχνία» for another lesson, but «✎ στο πρόγραμμα: αίθουσα 12» when
+only the room was changed. «στο πρόγραμμα: Φυσική» under a Φυσική would read as
+if the lesson had changed. A second teacher (ένταξη) stays when the first one
+does. An hour made «Κενό» keeps its row for the same reason. The ⚙ sheet lists
+every change for the class in the same terms («Τρίτη 4η · Φυσική — αίθουσα 14
+αντί για 12»), each with a ✕, plus «Σβήσε όλες».
 
 Changes live on the phone only, in `gel7.changes.v1`, per class (`section` →
 `"d-p"` → change), together with the stamp of the timetable they were made on.
@@ -416,13 +438,17 @@ lesson, so after picking a different orientation, a change to one of its hours
 just stops applying rather than landing on another subject.
 
 **A new timetable wipes them**, a correction included, since either can move
-hours. The «Νέο πρόγραμμα» banner warns first («Οι αλλαγές σου θα
-σβηστούν.»). After the update, a banner says they were removed and offers
-«Αλλαγές», which opens edit mode with a reminder of what the student had
-(«Τρίτη 4η → Λογοτεχνία»), kept until «Τέλος». Carrying them over by hour
-number would put a «Λογοτεχνία» on whatever lands in that hour next. A change
-saved against a different timetable stamp is ignored on load, so no other path
-can bring one back either.
+hours. The «Νέο πρόγραμμα» banner warns first, and says they are not lost
+without a trace («Οι δικές σου αλλαγές θα σβηστούν, αλλά θα σου δείξουμε ποιες
+ήταν.»), so the update is not put off to keep them. After the update, a banner
+says «Ήρθε νέο πρόγραμμα» (or «Το πρόγραμμα διορθώθηκε») and that they were
+removed, and offers «Δες τες». That opens edit mode with the list of what the
+student had, in the words of the settings list. The list is saved
+(`gel7.recall.v1`), so it survives the app being closed before it was looked at.
+It goes when edit mode is left with «Τέλος», or when its banner is dismissed
+with ✕. Carrying changes over by hour number would put a «Λογοτεχνία» on
+whatever lands in that hour next. A change saved against a different timetable
+stamp is ignored on load, so no other path can bring one back either.
 
 In the week grid an unchanged combined hour reads «Γλ./Λογ.» (`subjectShort`
 in `tools/aliases.json`), not plain «Γλώσσα», so it is not mistaken for an hour

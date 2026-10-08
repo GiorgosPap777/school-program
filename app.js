@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.12.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -23,6 +23,7 @@ const KEY_DISMISSED = 'gel7.dismissed.v1';
 const KEY_LAST_CHECK = 'gel7.lastcheck.v1';
 const KEY_PENDING = 'gel7.pending.v1';
 const KEY_CHANGES = 'gel7.changes.v1';
+const KEY_RECALL = 'gel7.recall.v1';
 // index.html reads this one too, before anything is drawn — see the <head>.
 const KEY_THEME = 'gel7.theme.v1';
 
@@ -47,7 +48,11 @@ const state = {
   changes: {},
   editing: false,
   edit: null,
-  // What the student had changed before a new timetable wiped it, as a reminder.
+  // The ⚙ sheet: 'summary' of a saved class (and what else lives there), or
+  // 'class' for picking one. See openPicker().
+  pickerMode: 'class',
+  // What the student had changed before a new timetable wiped it, as a
+  // reminder: { section, corrected, items: changeRows() }. See applySchedule().
   recall: null,
   conflicts: [],
   view: 'today',
@@ -503,9 +508,14 @@ function applyChanges(base, changes) {
     if (!row || p < 1 || p > row.length) continue;
     const orig = row[p - 1];
     if ((orig ? orig.subject : '') !== change.was) continue;
+    // The same teacher keeps whoever teaches beside them, and the note on
+    // them: a new room does not send the ένταξη teacher away.
+    const keep = !change.free && orig && change.teacher === (orig.teacher || '');
     row[p - 1] = change.free ? null : {
       d, p, subject: change.subject, teacher: change.teacher,
       room: change.room, group: change.group, changed: true,
+      ...(keep ? { teacherNote: orig.teacherNote, teacherNoteShort: orig.teacherNoteShort,
+        with: orig.with } : {}),
     };
     marks.set(key, change);
   }
@@ -566,6 +576,137 @@ function changeFromEdit(edit, base) {
     if (teacher === usual.teacher && room === usual.room) return null;
   }
   return { subject, teacher, room, group: edit.other ? '' : edit.group || '', was };
+}
+
+/** What a change does to its hour, against the lesson the timetable has
+    there. Either it is another lesson (or none), or it is the same lesson
+    with another teacher or room — and then only those are worth saying:
+    «στο πρόγραμμα: Φυσική» under a Φυσική reads as if the lesson had moved. */
+function changeDiff(change, orig) {
+  if (change.free || !orig || change.subject !== orig.subject) return { lesson: true, details: [] };
+  const details = [];
+  const teacher = orig.teacher || '';
+  if (change.teacher !== teacher) {
+    details.push({ name: 'καθηγητής', none: 'χωρίς καθηγητή', from: teacher, to: change.teacher });
+  }
+  const room = lessonRoom(orig);
+  if (change.room !== room) {
+    details.push({ name: 'αίθουσα', none: 'χωρίς αίθουσα', from: room, to: change.room });
+  }
+  return { lesson: !details.length, details };
+}
+
+/** The line under a changed hour: what the school's timetable has instead. */
+function changeNote(change, orig) {
+  const diff = changeDiff(change, orig);
+  return 'στο πρόγραμμα: ' + (diff.lesson ? change.was || 'Κενό'
+    : diff.details.map((x) => (x.from ? `${x.name} ${x.from}` : x.none)).join(', '));
+}
+
+/** A change in words, for the settings list and the reminder after a new
+    timetable: what the hour has now, and what it has in place of. */
+function changeSummary(change, orig) {
+  const diff = changeDiff(change, orig);
+  if (diff.lesson) {
+    return { what: change.free ? 'Κενό' : change.subject, how: `αντί για ${change.was || 'Κενό'}` };
+  }
+  return {
+    what: change.subject,
+    how: diff.details.map((x) => `${x.to ? `${x.name} ${x.to}` : x.none}`
+      + ` αντί για ${x.from || '—'}`).join(' · '),
+  };
+}
+
+/** Every hour of the week the timetable gives to one subject. */
+function subjectHours(base, subject) {
+  const keys = [];
+  base.forEach((row, d) => row.forEach((l, i) => {
+    if (l && l.subject === subject) keys.push(hourKey(d, i + 1));
+  }));
+  return keys;
+}
+
+const hourName = (key) => {
+  const [d, p] = key.split('-').map(Number);
+  return `${DAY_SHORT[d] || state.schedule.days[d] || ''} ${p}η`;
+};
+
+/** A change as it would be made on any hour of its lesson: the teacher and
+    room only where they are not the hour's own. Two hours with the same
+    shape were given the same change. */
+function changeShape(base, change, orig) {
+  if (change.free) return 'free';
+  const usual = lessonDefaults(base, orig, change.subject);
+  return JSON.stringify([change.subject,
+    change.teacher === usual.teacher ? null : change.teacher,
+    change.room === usual.room ? null : change.room]);
+}
+
+/** The subject whose every hour carries the same change as this one — made
+    with «σε όλες τις ώρες» or one at a time, it is one change to the student
+    and is listed and edited as one. Null when there is no such subject. */
+function wholeSubject(base, changes, key) {
+  const [d, p] = key.split('-').map(Number);
+  const orig = base[d] && base[d][p - 1];
+  if (!orig) return null;
+  const keys = subjectHours(base, orig.subject);
+  if (keys.length < 2) return null;
+  const shapes = new Set();
+  for (const k of keys) {
+    const [kd, kp] = k.split('-').map(Number);
+    const c = changes[k];
+    if (!c || c.was !== orig.subject) return null;
+    shapes.add(changeShape(base, c, base[kd][kp - 1]));
+  }
+  return shapes.size === 1 ? { subject: orig.subject, keys } : null;
+}
+
+/** The edit made on one hour, as it goes onto another hour of the same
+    lesson. Only what the student actually changed travels: a teacher or room
+    left as it was stays each hour's own, so a new teacher for every Φυσική
+    does not also drag the lab hours into the classroom. */
+function editForHour(edit, base, orig) {
+  const copy = { ...edit, orig };
+  if (edit.free || edit.other) return copy;
+  const mine = lessonDefaults(base, edit.orig, edit.subject);
+  const theirs = lessonDefaults(base, orig, edit.subject);
+  for (const k of ['teacher', 'room', 'group']) {
+    if ((edit[k] || '').trim() === mine[k]) copy[k] = theirs[k];
+  }
+  return copy;
+}
+
+/** One class's changes as the student reads them: one row per hour, or one
+    for a whole subject changed the same way in every hour. `base` is the week
+    they were made on. */
+function changeRows(base, changes) {
+  const keys = Object.keys(changes).sort((a, b) => {
+    const [ad, ap] = a.split('-').map(Number), [bd, bp] = b.split('-').map(Number);
+    return ad - bd || ap - bp;
+  });
+  const done = new Set();
+  const rows = [];
+  for (const key of keys) {
+    if (done.has(key)) continue;
+    const c = changes[key];
+    const [d, p] = key.split('-').map(Number);
+    const orig = base[d] ? base[d][p - 1] || null : null;
+    const applies = (orig ? orig.subject : '') === c.was;
+    const whole = applies && wholeSubject(base, changes, key);
+    const group = whole ? whole.keys : [key];
+    group.forEach((k) => done.add(k));
+    const sum = applies ? changeSummary(c, orig)
+      : { what: c.free ? 'Κενό' : c.subject, how: 'δεν ισχύει με τις τωρινές επιλογές σου' };
+    rows.push({
+      keys: group,
+      when: whole ? `Όλες οι ώρες «${whole.subject}» (${group.length})`
+        : `${state.schedule.days[d] || ''} ${p}η`,
+      // A whole subject's name is already in `when`; only a new one is news.
+      what: whole && sum.what === whole.subject ? '' : sum.what,
+      how: whole && sum.what !== whole.subject ? '' : sum.how,
+    });
+  }
+  return rows;
 }
 
 /* --------------------------------------------------------------- clock status */
@@ -815,7 +956,8 @@ function renderDayList(target, dayIdx, status, withHeading) {
     const mark = state.marks.get(hourKey(dayIdx, p + 1));
     if (mark) {
       classes.push('slot--changed');
-      instead += `<p class="slot__instead">✎ στο πρόγραμμα: ${esc(mark.was || 'Κενό')}</p>`;
+      const orig = state.baseGrid[dayIdx][p] || null;
+      instead += `<p class="slot__instead">✎ ${esc(changeNote(mark, orig))}</p>`;
     }
 
     const li = document.createElement('li');
@@ -1048,16 +1190,71 @@ function onlyKontra(map, trackId) {
   return map;
 }
 
+/** ⚙ opens on a summary once a class is saved: the class in a few lines and
+    a button to change it, then the student's own changes, without scrolling
+    past every chip of the picker to reach them — and room for whatever else
+    settings grow. With nothing saved yet it goes straight to picking. */
 function openPicker() {
   if (!state.schedule) return;   // nothing to pick from until one has loaded
   state.draft = state.selection
     ? { ...state.selection, extras: [...(state.selection.extras || [])] }
     : { grade: null, section: null, track: null, kontra: null, extras: [] };
+  state.pickerMode = state.selection ? 'summary' : 'class';
   renderPicker();
   $('picker').showModal();
 }
 
 function renderPicker() {
+  const summary = state.pickerMode === 'summary' && !!state.draft.section;
+  $('pickerTitle').textContent = summary ? 'Ρυθμίσεις' : 'Το τμήμα σου';
+  $('pickerFoot').hidden = summary;
+  if (summary) renderSettings();
+  else renderClassPicker();
+}
+
+/** A group as the summary names it: its label, and what it is when that says
+    more than the label does. */
+function groupName(id) {
+  const g = state.schedule.groups[id];
+  if (!g) return id;
+  const what = g.track || g.name;
+  return what && what !== g.label ? `${g.label} (${what})` : g.label;
+}
+
+function renderSettings() {
+  const draft = state.draft;
+  const body = $('pickerBody');
+  body.innerHTML = '';
+
+  const rows = [];
+  if (draft.track) rows.push(['Προσανατολισμός', groupName(draft.track)]);
+  if (draft.kontra) rows.push(['Κόντρα', groupName(draft.kontra)]);
+  if ((draft.extras || []).length) rows.push(['Ομάδες', draft.extras.map(groupName).join(', ')]);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'field';
+  wrap.innerHTML = '<p class="field__label">Το τμήμα σου</p>';
+  const card = document.createElement('div');
+  card.className = 'myclass';
+  card.innerHTML = `<p class="myclass__name"><strong>${esc(draft.section)}</strong>`
+    + `${draft.grade ? ` · ${esc(draft.grade)}΄ Λυκείου` : ''}</p>`
+    + rows.map(([k, v]) => `<p class="myclass__row">${esc(k)}: ${esc(v)}</p>`).join('');
+  const change = document.createElement('button');
+  change.type = 'button';
+  change.className = 'ghost-btn';
+  change.textContent = 'Αλλαγή τμήματος';
+  change.addEventListener('click', () => {
+    state.pickerMode = 'class';
+    renderPicker();
+  });
+  card.appendChild(change);
+  wrap.appendChild(card);
+  body.appendChild(wrap);
+
+  body.appendChild(changesField(draft));
+}
+
+function renderClassPicker() {
   const draft = state.draft;
   const model = pickerModel(draft.grade, draft);
   // Moving to another class — or another orientation — takes with it whatever
@@ -1132,8 +1329,6 @@ function renderPicker() {
       }))));
   }
 
-  if (draft.section) body.appendChild(changesField(draft));
-
   finishPicker(draft.section ? '' : 'Διάλεξε τμήμα για να συνεχίσεις.');
 }
 
@@ -1144,6 +1339,12 @@ function commitPicker() {
   $('picker').close();
   render();
   return true;
+}
+
+/** A row of changeRows(), for the settings list and the reminder alike. */
+function changeRowHtml(row) {
+  return `<strong>${esc(row.when)}</strong>${row.what ? ` · ${esc(row.what)}` : ''}`
+    + (row.how ? `<small>${esc(row.how)}</small>` : '');
 }
 
 /** «Δικές σου αλλαγές»: the way into edit mode, and every change this class
@@ -1157,34 +1358,24 @@ function changesField(draft) {
     + ' Μένουν μόνο σε αυτό το κινητό και σβήνονται όταν βγει νέο πρόγραμμα.</p>';
 
   const mine = classChanges(draft.section);
-  const keys = Object.keys(mine).sort((a, b) => {
-    const [ad, ap] = a.split('-').map(Number), [bd, bp] = b.split('-').map(Number);
-    return ad - bd || ap - bp;
-  });
-  if (keys.length) {
-    // Measured against the class as it stands in the picker, which may not
-    // be what is saved yet.
-    const base = buildGrid(state.schedule, draft).grid;
+  // Measured against the class as it stands in the picker, which may not be
+  // what is saved yet.
+  const rows = Object.keys(mine).length
+    ? changeRows(buildGrid(state.schedule, draft).grid, mine) : [];
+  if (rows.length) {
     const list = document.createElement('ul');
     list.className = 'changes';
-    for (const key of keys) {
-      const c = mine[key];
-      const [d, p] = key.split('-').map(Number);
-      const slot = base[d] && base[d][p - 1];
-      const applies = (slot ? slot.subject : '') === c.was;
-      const day = state.schedule.days[d] || '';
+    for (const row of rows) {
       const li = document.createElement('li');
       li.className = 'change';
-      li.innerHTML = `<p><strong>${esc(day)} ${p}η</strong> · ${esc(c.free ? 'Κενό' : c.subject)}`
-        + `<small>${applies ? `αντί για ${esc(c.was || 'Κενό')}`
-          : 'δεν ισχύει με τις τωρινές επιλογές σου'}</small></p>`;
+      li.innerHTML = `<p>${changeRowHtml(row)}</p>`;
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'change__del';
-      del.setAttribute('aria-label', `Σβήσε την αλλαγή ${day} ${p}η`);
+      del.setAttribute('aria-label', `Σβήσε την αλλαγή: ${row.when}`);
       del.textContent = '✕';
       del.addEventListener('click', () => {
-        delete mine[key];
+        row.keys.forEach((key) => { delete mine[key]; });
         storeChanges();
         render();
         renderPicker();
@@ -1204,7 +1395,7 @@ function changesField(draft) {
   // Whatever was just picked above is what gets edited, so it is saved first.
   edit.addEventListener('click', () => { if (commitPicker()) setEditing(true); });
   actions.appendChild(edit);
-  if (keys.length > 1) {
+  if (rows.length > 1) {
     const all = document.createElement('button');
     all.type = 'button';
     all.className = 'ghost-btn';
@@ -1229,7 +1420,8 @@ function changesField(draft) {
     students open the app to see their next lesson and nothing more. */
 function setEditing(on) {
   state.editing = on;
-  if (!on) state.recall = null;
+  // The reminder has been seen once edit mode is left: it is done with.
+  if (!on) forgetRecall();
   render();
 }
 
@@ -1237,11 +1429,13 @@ function renderEditing() {
   $('editBar').hidden = !state.editing;
   $('main').classList.toggle('is-editing', state.editing);
   const recall = $('editRecall');
-  const items = state.editing && state.recall ? state.recall : [];
+  const r = state.recall;
+  const items = state.editing && r && state.selection && r.section === state.selection.section
+    ? r.items : [];
   recall.hidden = !items.length;
   recall.innerHTML = items.length
-    ? '<p>Πριν από το νέο πρόγραμμα είχες:</p><ul>'
-      + items.map((r) => `<li><strong>${esc(r.day)} ${r.p}η</strong> → ${esc(r.subject)}</li>`).join('')
+    ? `<p>Στο προηγούμενο πρόγραμμα είχες βάλει:</p><ul>`
+      + items.map((row) => `<li>${changeRowHtml(row)}</li>`).join('')
       + '</ul>'
     : '';
 }
@@ -1267,7 +1461,11 @@ function openEditSheet(d, p) {
   if (!base || !base[d] || p < 1 || p > base[d].length) return;
   const orig = base[d][p - 1];
   const change = state.marks.get(hourKey(d, p));
-  const edit = { d, p, orig, existing: !!change, free: false, other: false, otherText: '' };
+  const edit = { d, p, orig, existing: !!change, free: false, other: false, otherText: '',
+    // Every hour of this lesson, for «και στις άλλες ώρες».
+    siblings: orig ? subjectHours(base, orig.subject) : [] };
+  // A change already in every one of them is edited in every one of them.
+  edit.all = !!(change && wholeSubject(base, classChanges(state.selection.section), hourKey(d, p)));
   if (change && change.free) {
     edit.free = true;
   } else if (change) {
@@ -1347,6 +1545,24 @@ function renderEditSheet() {
       (value) => { e.room = value; }, true));
     body.appendChild(more);
   }
+
+  // The same change in every hour of this lesson, instead of one by one.
+  const others = e.siblings.filter((k) => k !== hourKey(e.d, e.p));
+  if (e.orig && others.length) {
+    const label = document.createElement('label');
+    label.className = 'everyhour';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.id = 'editAll';
+    box.checked = !!e.all;
+    box.addEventListener('change', () => { e.all = box.checked; finishEdit(); });
+    const text = document.createElement('span');
+    text.innerHTML = (others.length === 1 ? 'Και στην άλλη ώρα' : `Και στις άλλες ${others.length} ώρες`)
+      + ` «${esc(e.orig.subject)}»<small>${esc(others.map(hourName).join(', '))}</small>`;
+    label.appendChild(box);
+    label.appendChild(text);
+    body.appendChild(label);
+  }
   finishEdit();
 }
 
@@ -1375,19 +1591,29 @@ function textInput(id, label, value, onInput, labelled) {
   return wrap;
 }
 
+/** The hours a save or a reset in the sheet goes to. */
+function editHours(e) {
+  return e.all && e.orig ? e.siblings : [hourKey(e.d, e.p)];
+}
+
 function finishEdit() {
   const e = state.edit;
   $('editSave').disabled = e.other && !e.otherText.trim();
-  $('editReset').hidden = !e.existing;
+  const mine = state.selection ? classChanges(state.selection.section) : {};
+  $('editReset').hidden = !editHours(e).some((key) => mine[key]);
 }
 
 function saveEdit() {
   const e = state.edit;
   if (!e || !state.selection || (e.other && !e.otherText.trim())) return;
-  const change = changeFromEdit(e, state.baseGrid);
+  const base = state.baseGrid;
   const mine = classChanges(state.selection.section, true);
-  if (change) mine[hourKey(e.d, e.p)] = change;
-  else delete mine[hourKey(e.d, e.p)];
+  for (const key of editHours(e)) {
+    const [d, p] = key.split('-').map(Number);
+    const change = changeFromEdit(editForHour(e, base, base[d][p - 1]), base);
+    if (change) mine[key] = change;
+    else delete mine[key];
+  }
   storeChanges();
   $('editSheet').close();
   render();
@@ -1396,7 +1622,8 @@ function saveEdit() {
 function resetEdit() {
   const e = state.edit;
   if (!e || !state.selection) return;
-  delete classChanges(state.selection.section)[hourKey(e.d, e.p)];
+  const mine = classChanges(state.selection.section);
+  editHours(e).forEach((key) => { delete mine[key]; });
   storeChanges();
   $('editSheet').close();
   render();
@@ -1722,7 +1949,7 @@ function colourRow(key, label) {
 
 /* ------------------------------------------------------------------ banners */
 
-function banner({ id, text, actionText, onAction, tone }) {
+function banner({ id, text, actionText, onAction, onDismiss, tone }) {
   if (document.querySelector(`[data-banner="${id}"]`)) return;
   const el = document.createElement('div');
   el.className = 'banner' + (tone === 'warn' ? ' banner--warn' : '');
@@ -1741,7 +1968,7 @@ function banner({ id, text, actionText, onAction, tone }) {
   close.className = 'banner__dismiss';
   close.setAttribute('aria-label', 'Απόρριψη');
   close.textContent = '✕';
-  close.addEventListener('click', () => el.remove());
+  close.addEventListener('click', () => { el.remove(); if (onDismiss) onDismiss(); });
   el.appendChild(close);
   $('banners').appendChild(el);
 }
@@ -1808,9 +2035,11 @@ function offerSchedule(candidate) {
   // the import of it has been corrected. Saying «νέο πρόγραμμα» next to a
   // version the student can already see in the footer just reads as a bug.
   const corrected = String(candidate.version) === String(state.schedule.version);
-  // Said before the tap, not only after: taking it wipes them.
+  // Said before the tap, not only after: taking it wipes them. And said so
+  // the tap is not put off for their sake — they are not lost for good, and
+  // an old timetable kept to hold on to them is far worse.
   const losing = state.selection && Object.keys(classChanges(state.selection.section)).length
-    ? ' Οι αλλαγές σου θα σβηστούν.' : '';
+    ? ' Οι δικές σου αλλαγές θα σβηστούν, αλλά θα σου δείξουμε ποιες ήταν.' : '';
   banner({
     id: 'newdata',
     text: (corrected
@@ -1842,12 +2071,20 @@ function applySchedule(schedule) {
   // The student's changes were made on the old hours, so they go with them —
   // a correction included, since that can move hours too. What this class
   // had is kept in memory as a reminder for putting them back.
+  // Put in words now, against the old week, while there still is one.
   const old = state.schedule;
   const had = state.selection ? classChanges(state.selection.section) : {};
-  state.recall = Object.keys(had).map((key) => {
-    const [d, p] = key.split('-').map(Number);
-    return { d, p, day: old.days[d] || '', subject: had[key].free ? 'Κενό' : had[key].subject };
-  }).sort((a, b) => a.d - b.d || a.p - b.p);
+  const items = Object.keys(had).length
+    ? changeRows(buildGrid(old, state.selection).grid, had) : [];
+  // With nothing to remind of, a reminder not yet seen from an earlier
+  // timetable is kept: those changes have not been put back either.
+  if (items.length) {
+    state.recall = {
+      section: state.selection.section,
+      corrected: String(schedule.version) === String(old.version),
+      items: items.map(({ when, what, how }) => ({ when, what, how })),
+    };
+  }
   state.changes = {};
   localStorage.removeItem(KEY_CHANGES);
 
@@ -1859,7 +2096,7 @@ function applySchedule(schedule) {
   const pruned = pruneSelection(state.selection, schedule);
   if (!pruned) {
     state.selection = null;
-    state.recall = null;   // they were for a class that no longer exists
+    forgetRecall();   // it was for a class that no longer exists
     banner({ id: 'repick', tone: 'warn', text: 'Το τμήμα σου άλλαξε στο νέο πρόγραμμα — διάλεξε ξανά.' });
     openPicker();
     return;
@@ -1870,16 +2107,48 @@ function applySchedule(schedule) {
   if (lostSomething) {
     banner({ id: 'partial', tone: 'warn', text: 'Κάποιες ομάδες δεν υπάρχουν πια — έλεγξε τις επιλογές σου.' });
   }
-  if (state.recall.length) {
-    banner({
-      id: 'changes',
-      tone: 'warn',
-      text: 'Το πρόγραμμα άλλαξε, οπότε οι αλλαγές σου σβήστηκαν — βάλ’ τες ξανά αν ισχύουν ακόμα.',
-      actionText: 'Αλλαγές',
-      onAction: () => setEditing(true),
-    });
+  if (items.length) {
+    save(KEY_RECALL, state.recall);
+    offerRecall();
   }
   render();
+}
+
+/** The reminder of the changes a new timetable wiped. It stays — across
+    closing the app, too — until it has been looked at in edit mode or waved
+    away: tapping «Ενημέρωση» on the bus and losing the phone to the lock
+    screen should not lose the list with it. */
+function offerRecall() {
+  const r = state.recall;
+  banner({
+    id: 'changes',
+    tone: 'warn',
+    text: (r.corrected ? 'Το πρόγραμμα διορθώθηκε' : 'Ήρθε νέο πρόγραμμα')
+      + ', οπότε οι αλλαγές σου σβήστηκαν. Δες ποιες ήταν και βάλ’ τες ξανά όσες ισχύουν ακόμα.',
+    actionText: 'Δες τες',
+    onAction: () => setEditing(true),
+    onDismiss: forgetRecall,
+  });
+}
+
+function forgetRecall() {
+  state.recall = null;
+  localStorage.removeItem(KEY_RECALL);
+}
+
+/** A reminder saved on an earlier visit, still for the class picked now. */
+function loadRecall() {
+  const saved = load(KEY_RECALL, null);
+  const text = (v) => typeof v === 'string';
+  const ok = saved && state.selection && saved.section === state.selection.section
+    && Array.isArray(saved.items) && saved.items.length
+    && saved.items.every((r) => r && text(r.when) && text(r.what) && text(r.how));
+  if (!ok) {
+    localStorage.removeItem(KEY_RECALL);
+    return null;
+  }
+  return { section: saved.section, corrected: !!saved.corrected,
+    items: saved.items.map((r) => ({ when: r.when, what: r.what, how: r.how })) };
 }
 
 /* ------------------------------------------------ service worker + install */
@@ -2088,6 +2357,7 @@ async function start() {
 
   state.selection = pruneSelection(load(KEY_SELECTION, null), state.schedule);
   state.changes = loadChanges(state.schedule);
+  state.recall = loadRecall();
 
   if (!state.selection) {
     openPicker();
@@ -2097,6 +2367,7 @@ async function start() {
 
   setView('today');
   startTicking();
+  if (state.recall) offerRecall();
   offerPendingSchedule();
   // Skip the check when the bundle we just fetched *is* the remote file.
   // Otherwise a cold start always checks, throttle or not: it costs one 304,

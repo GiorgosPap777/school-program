@@ -28,7 +28,9 @@ function element() {
     innerHTML: '', className: '', textContent: '', hidden: false, disabled: false,
     style: {}, dataset: {}, children: [], parent: null,
     classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
-    setAttribute() {}, addEventListener() {}, showModal() {}, close() {}, focus() {},
+    setAttribute() {}, showModal() {}, close() {}, focus() {},
+    // Kept, so a test can press a button app.js made.
+    addEventListener(type, fn) { (this.on = this.on || {})[type] = fn; },
     insertAdjacentHTML() {},
     appendChild(child) { this.children.push(child); child.parent = this; return child; },
     remove() {
@@ -780,20 +782,208 @@ await test('a new timetable warns before it wipes the changes, then asks for the
   app('storeChanges')();
 
   app('offerSchedule')(newer);
-  assert.match(text('newdata'), /Οι αλλαγές σου θα σβηστούν/);
+  // Warned, and told they are not lost for good — or the update gets put off.
+  assert.match(text('newdata'), /δικές σου αλλαγές θα σβηστούν, αλλά θα σου δείξουμε ποιες ήταν/);
   app('applySchedule')(newer);
   vm.runInContext('clearTimeout(tickTimer)', sandbox);
   assert.deepEqual({ ...state.changes }, {});
   assert.equal(storage.has(app('KEY_CHANGES')), false, 'the old changes are still stored');
-  assert.match(text('changes'), /σβήστηκαν/);
-  assert.deepEqual(Array.from(state.recall, (r) => [r.d, r.p, r.subject]), [[hour.d, hour.p, first]]);
+  assert.match(text('changes'), /^<p>Ήρθε νέο πρόγραμμα, οπότε οι αλλαγές σου σβήστηκαν/);
+  const reminder = [{ when: `${real.days[hour.d]} ${hour.p}η`, what: first, how: `αντί για ${hour.lesson.subject}` }];
+  assert.deepEqual(JSON.parse(JSON.stringify(state.recall.items)), reminder);
+  // It outlives closing the app, for this class only.
+  assert.deepEqual(JSON.parse(JSON.stringify(app('loadRecall')().items)), reminder);
+  // Waved away, it is gone for good.
+  const bar = shown.find((b) => b.dataset.banner === 'changes');
+  bar.children.find((c) => c.className === 'banner__dismiss').on.click();
+  assert.equal(state.recall, null);
+  assert.equal(storage.has(app('KEY_RECALL')), false, 'a dismissed reminder is still stored');
   // Nothing to warn about without changes.
   shown.length = 0;
   app('offerSchedule')({ ...newer, version: '2099-02-01' });
   assert.doesNotMatch(text('newdata'), /αλλαγές/);
   shown.length = 0;
-  state.recall = null;
   storage.clear();
+});
+
+await test('a corrected timetable says so, and the reminder goes once it has been seen', async () => {
+  const hour = combinedHour();
+  const real = JSON.parse(SCHEDULE_TEXT);
+  const shown = document.getElementById('banners').children;
+  storage.clear();
+  shown.length = 0;
+  state.schedule = real;
+  state.selection = { grade: hour.grade, section: hour.section, track: null, kontra: null, extras: [] };
+  state.changes = { [hour.section]: { [`${hour.d}-${hour.p}`]: { free: true, was: hour.lesson.subject } } };
+  app('applySchedule')({ ...real, generatedAt: '2099-01-01T00:00:00Z' });
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  const bar = shown.find((b) => b.dataset.banner === 'changes');
+  assert.match(bar.innerHTML, /^<p>Το πρόγραμμα διορθώθηκε,/);
+  // Another class picked since: not this one's reminder.
+  state.selection = { ...state.selection, section: 'κανένα' };
+  assert.equal(app('loadRecall')(), null);
+  assert.equal(storage.has(app('KEY_RECALL')), false);
+  // «Δες τες» opens edit mode with the list; leaving it is done with it.
+  state.selection = { grade: hour.grade, section: hour.section, track: null, kontra: null, extras: [] };
+  state.recall = { section: hour.section, corrected: true, items: [{ when: 'Δευτέρα 1η', what: 'Κενό', how: '' }] };
+  storage.set(app('KEY_RECALL'), JSON.stringify(state.recall));
+  bar.children.find((c) => c.className === 'banner__act').on.click();
+  assert.equal(state.editing, true);
+  assert.match(document.getElementById('editRecall').innerHTML, /Δευτέρα 1η<\/strong> · Κενό/);
+  app('setEditing')(false);
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  assert.equal(state.recall, null);
+  assert.equal(storage.has(app('KEY_RECALL')), false);
+  shown.length = 0;
+  storage.clear();
+});
+
+/** Three Φυσική hours with one teacher — one of them in the lab, one with a
+    second teacher beside them — and a Ιστορία on its own. */
+const LAB = {
+  ...TINY, version: 'lab',
+  rooms: { ΕΦ: 'Εργ. Φυσικής' },
+  groups: {
+    Χ1: { label: 'Χ1', grade: 'Α', kind: 'section', room: 'Αίθ. 1', lessons: [
+      { d: 0, p: 1, subject: 'Φυσική', teacher: 'Παπαδόπουλος' },
+      { d: 1, p: 2, subject: 'Φυσική', teacher: 'Παπαδόπουλος', room: 'ΕΦ' },
+      { d: 2, p: 1, subject: 'Ιστορία', teacher: 'Ιωάννου' },
+      { d: 3, p: 3, subject: 'Φυσική', teacher: 'Παπαδόπουλος', with: [{ teacher: 'Λαμπρίδου' }] },
+    ] },
+  },
+};
+const LAB_SEL = { grade: 'Α', section: 'Χ1', track: null, kontra: null, extras: [] };
+
+await test('a new teacher or room is what the change says, not the lesson', async () => {
+  state.schedule = LAB;
+  const base = app('buildGrid')(LAB, LAB_SEL).grid;
+  const lab = base[1][1];
+  const note = (patch) => app('changeNote')({ subject: 'Φυσική', teacher: 'Παπαδόπουλος',
+    room: 'Εργ. Φυσικής', group: '', was: 'Φυσική', ...patch }, lab);
+  assert.equal(note({ room: 'Αμφιθέατρο' }), 'στο πρόγραμμα: αίθουσα Εργ. Φυσικής');
+  assert.equal(note({ teacher: 'Νικολάου' }), 'στο πρόγραμμα: καθηγητής Παπαδόπουλος');
+  assert.equal(note({ teacher: 'Νικολάου', room: '' }),
+    'στο πρόγραμμα: καθηγητής Παπαδόπουλος, αίθουσα Εργ. Φυσικής');
+  // Another lesson altogether: just the lessons, whatever came with it.
+  assert.equal(note({ subject: 'Χημεία', teacher: 'Νικολάου' }), 'στο πρόγραμμα: Φυσική');
+  assert.equal(app('changeNote')({ free: true, was: 'Φυσική' }, lab), 'στο πρόγραμμα: Φυσική');
+  const sum = (patch) => ({ ...app('changeSummary')({ subject: 'Φυσική', teacher: 'Παπαδόπουλος',
+    room: 'Εργ. Φυσικής', group: '', was: 'Φυσική', ...patch }, lab) });
+  assert.deepEqual(sum({ room: '' }), { what: 'Φυσική', how: 'χωρίς αίθουσα αντί για Εργ. Φυσικής' });
+  assert.deepEqual(sum({ subject: 'Θέατρο' }), { what: 'Θέατρο', how: 'αντί για Φυσική' });
+
+  // On the day list, too — and the second teacher stays with the first.
+  const changes = { '1-2': { subject: 'Φυσική', teacher: 'Παπαδόπουλος', room: 'Αμφιθέατρο', group: '', was: 'Φυσική' },
+    '3-3': { subject: 'Φυσική', teacher: 'Παπαδόπουλος', room: 'Αμφιθέατρο', group: '', was: 'Φυσική' } };
+  const mine = app('applyChanges')(base, changes);
+  assert.equal(mine.grid[3][2].with[0].teacher, 'Λαμπρίδου', 'a new room sent the second teacher away');
+  const other = app('applyChanges')(base, { '3-3': { ...changes['3-3'], teacher: 'Νικολάου' } });
+  assert.equal(other.grid[3][2].with, undefined, 'a new teacher kept the old one\'s partner');
+  Object.assign(state, { selection: LAB_SEL, editing: false, baseGrid: base, grid: mine.grid, marks: mine.marks });
+  const list = document.getElementById('todayList');
+  list.children.length = 0;
+  app('renderDayList')(list, 1, app('clockStatus')(LAB, new Date('2026-10-04T12:00')), false);
+  assert.match(list.children[1].innerHTML, /✎ στο πρόγραμμα: αίθουσα Εργ\. Φυσικής/);
+  assert.doesNotMatch(list.children[1].innerHTML, /στο πρόγραμμα: Φυσική/);
+  state.marks = new Map();
+});
+
+await test('«και στις άλλες ώρες» changes every hour of the lesson, and only what was changed', async () => {
+  storage.clear();
+  state.schedule = LAB;
+  state.selection = LAB_SEL;
+  state.changes = {};
+  state.editing = true;
+  app('render')();
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  const body = document.getElementById('editBody');
+  const open = (d, p) => { body.children.length = 0; app('openEditSheet')(d, p); return state.edit; };
+  const offered = () => body.children.some((c) => c.className === 'everyhour');
+
+  // A lesson with one hour a week has no others to offer.
+  open(2, 1);
+  assert.equal(offered(), false);
+  const e = open(0, 1);
+  assert.deepEqual(Array.from(e.siblings), ['0-1', '1-2', '3-3']);
+  assert.equal(offered(), true);
+  assert.equal(e.all, false, 'a first change starts on this hour alone');
+  Object.assign(e, { teacher: 'Νικολάου', all: true });
+  app('saveEdit')();
+  const mine = state.changes.Χ1;
+  assert.deepEqual(Object.keys(mine).sort(), ['0-1', '1-2', '3-3']);
+  assert.ok(Object.values(mine).every((c) => c.teacher === 'Νικολάου'));
+  assert.equal(mine['1-2'].room, 'Εργ. Φυσικής', 'the lab hour was moved with the teacher');
+  assert.equal(mine['0-1'].room, 'Αίθ. 1');
+  assert.ok(storage.has(app('KEY_CHANGES')));
+
+  // Listed as one change, and opened as one from any of its hours.
+  const rows = () => JSON.parse(JSON.stringify(app('changeRows')(state.baseGrid, state.changes.Χ1 || {})));
+  assert.deepEqual(rows(), [{ keys: ['0-1', '1-2', '3-3'], when: 'Όλες οι ώρες «Φυσική» (3)',
+    what: '', how: 'καθηγητής Νικολάου αντί για Παπαδόπουλος' }]);
+  const again = open(1, 2);
+  assert.equal(again.all, true);
+
+  // One hour on its own breaks it back into hours.
+  Object.assign(again, { all: false, room: 'Αμφιθέατρο' });
+  app('saveEdit')();
+  assert.equal(state.changes.Χ1['0-1'].room, 'Αίθ. 1');
+  const split = rows();
+  assert.equal(split.length, 3);
+  assert.equal(split[1].how, 'καθηγητής Νικολάου αντί για Παπαδόπουλος · αίθουσα Αμφιθέατρο αντί για Εργ. Φυσικής');
+  assert.equal(open(0, 1).all, false);
+
+  // «Επαναφορά» with the box ticked puts every hour back.
+  state.edit.all = true;
+  app('resetEdit')();
+  assert.equal(state.changes.Χ1, undefined);
+  assert.equal(storage.has(app('KEY_CHANGES')), false);
+
+  // A whole lesson made free — an exemption, say — reads as one line.
+  const free = open(0, 1);
+  Object.assign(free, { free: true, all: true });
+  app('saveEdit')();
+  assert.deepEqual(rows(), [{ keys: ['0-1', '1-2', '3-3'], when: 'Όλες οι ώρες «Φυσική» (3)', what: 'Κενό', how: '' }]);
+  state.changes = {};
+  app('setEditing')(false);
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  storage.clear();
+});
+
+await test('⚙ opens on a summary once a class is saved, with the class one tap away', async () => {
+  state.schedule = SCHEDULE;
+  const sel = selections.find((x) => x.track && x.extras.length) || selections.find((x) => x.track);
+  const body = document.getElementById('pickerBody');
+  const title = document.getElementById('pickerTitle');
+  const foot = document.getElementById('pickerFoot');
+  const kids = () => body.children;
+  const labels = () => kids().map((c) => c.innerHTML.match(/field__label">([^<]*)/)?.[1]).filter(Boolean);
+
+  // Nothing saved yet: straight to picking a class.
+  state.selection = null;
+  body.children.length = 0;
+  app('openPicker')();
+  assert.equal(title.textContent, 'Το τμήμα σου');
+  assert.equal(foot.hidden, false);
+  assert.deepEqual(labels()[0], 'Τάξη');
+
+  state.selection = sel;
+  state.changes = {};
+  body.children.length = 0;
+  app('openPicker')();
+  assert.equal(title.textContent, 'Ρυθμίσεις');
+  assert.equal(foot.hidden, true, 'the summary has nothing to save');
+  assert.deepEqual(labels(), ['Το τμήμα σου', 'Δικές σου αλλαγές']);
+  const card = kids()[0].children[0];
+  assert.match(card.innerHTML, new RegExp(`<strong>${sel.section}</strong> · ${sel.grade}΄ Λυκείου`));
+  assert.match(card.innerHTML, new RegExp(`Προσανατολισμός: ${sel.track}`));
+  // Changing the class is the full picker, and only that.
+  body.children.length = 0;
+  card.children.find((c) => c.textContent === 'Αλλαγή τμήματος').on.click();
+  assert.equal(title.textContent, 'Το τμήμα σου');
+  assert.equal(foot.hidden, false);
+  assert.equal(labels()[0], 'Τάξη');
+  assert.ok(!labels().includes('Δικές σου αλλαγές'));
+  assert.equal(document.getElementById('pickerSave').disabled, false);
 });
 
 /* ------------------------------------------------------------------- report */
