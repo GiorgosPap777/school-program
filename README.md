@@ -155,7 +155,7 @@ so without a bump the old files stay cached on every installed phone.
 
 No flags are normally needed: `--version` defaults to the creation date in the
 PDF footer, and `--valid-from` / `--valid-to` to the «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ
-5-10-26» banner aSc prints under every grid. Pass them only to override what the
+12-10-26» banner aSc prints under every grid. Pass them only to override what the
 PDF says. A revision with no end date in the banner simply has no `validTo`, and
 the app's footer reads «ισχύει από …» instead of a range.
 
@@ -227,10 +227,10 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 ```jsonc
 {
   "schemaVersion": 1,
-  "version": "2026-10-02",               // compared for update detection
-  "generatedAt": "2026-10-06T07:58:02+00:00",
-  "sourceDate": "2026-10-02",            // the date printed in the PDF footer
-  "validFrom": "2026-10-05", "validTo": null,   // read off the PDF's own banner
+  "version": "2026-10-09",               // compared for update detection
+  "generatedAt": "2026-10-11T08:46:37+00:00",
+  "sourceDate": "2026-10-09",            // the date printed in the PDF footer
+  "validFrom": "2026-10-12", "validTo": null,   // read off the PDF's own banner
   "days": ["Δευτέρα", "…"],
   "periods": [{ "n": 1, "start": "08:10", "end": "08:55" }],
   "rooms": { "ΕΠ": "Εργαστήριο Πληροφορικής" },
@@ -505,9 +505,9 @@ Four things keep it there, all of which are easy to undo by accident:
   gets those back as 304s. `reload` fetched everything again — 76 KB for a first
   install instead of 45 KB, and every icon re-sent on every update.
 
-Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 87 KB raw and
+Keep `gzip on` in whatever proxy sits in front — `schedule.json` is 88 KB raw and
 5.5 KB gzipped, so serving it uncompressed costs 16× more. nginx's default
-`gzip_comp_level` of 1 only gets it to 7.8 KB; the bundled config sets 6.
+`gzip_comp_level` of 1 only gets it to 7.7 KB; the bundled config sets 6.
 
 ## Testing
 
@@ -550,7 +550,7 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
 ## Notes and known limits
 
 - **The PDF says when it starts.** Every page carries a banner —
-  «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ 5-10-26», sometimes with an «εως …» end — and the
+  «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ 12-10-26», sometimes with an «εως …» end — and the
   converter reads `validFrom`/`validTo` from it instead of from a flag that is
   easy to forget or mistype. The report prints the banner it found.
 - **Class labels are folded to one spelling.** Whoever types the timetable into
