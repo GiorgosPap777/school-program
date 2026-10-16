@@ -1017,7 +1017,7 @@ await test('⚙ opens on a summary once a class is saved, with the class one tap
   app('openPicker')();
   assert.equal(title.textContent, 'Ρυθμίσεις');
   assert.equal(foot.hidden, true, 'the summary has nothing to save');
-  assert.deepEqual(labels(), ['Το τμήμα σου', 'Δικές σου αλλαγές']);
+  assert.deepEqual(labels(), ['Το τμήμα σου', 'Φίλοι', 'Δικές σου αλλαγές']);
   const card = kids()[0].children[0];
   assert.match(card.innerHTML, new RegExp(`<strong>${sel.section}</strong> · ${sel.grade}΄ Λυκείου`));
   assert.match(card.innerHTML, new RegExp(`Προσανατολισμός: ${sel.track}`));
@@ -1029,6 +1029,184 @@ await test('⚙ opens on a summary once a class is saved, with the class one tap
   assert.equal(labels()[0], 'Τάξη');
   assert.ok(!labels().includes('Δικές σου αλλαγές'));
   assert.equal(document.getElementById('pickerSave').disabled, false);
+});
+
+/* ------------------------------------------------------------------ friends */
+
+/** Χ1 is the student; Χ2 shares their Φυσική in the lab and nothing else, and
+    Χ3 leaves after the 1st hour. */
+const FR = {
+  ...TINY, version: 'friends',
+  rooms: { ΕΦ: 'Εργ. Φυσικής' },
+  groups: {
+    Χ1: { label: 'Χ1', grade: 'Α', kind: 'section', room: 'Αίθ. 1', lessons: [
+      { d: 0, p: 2, subject: 'Ιστορία', teacher: 'ΑΝΝΑ ΑΛΦΑ' },
+      { d: 0, p: 4, subject: 'Φυσική', teacher: 'ΠΕΤΡΟΣ ΠΙ', room: 'ΕΦ' },
+    ] },
+    Χ2: { label: 'Χ2', grade: 'Α', kind: 'section', room: 'Αίθ. 2', lessons: [
+      { d: 0, p: 1, subject: 'Αγγλικά', teacher: 'ΒΑΣΩ ΒΗΤΑ' },
+      { d: 0, p: 2, subject: 'Ιστορία', teacher: 'ΓΙΑΝΝΗΣ ΓΑΜΑ' },
+      { d: 0, p: 4, subject: 'Φυσική', teacher: 'ΠΕΤΡΟΣ ΠΙ', room: 'ΕΦ' },
+    ] },
+    Χ3: { label: 'Χ3', grade: 'Α', kind: 'section', room: 'Αίθ. 3', lessons: [
+      { d: 0, p: 1, subject: 'Αγγλικά', teacher: 'ΒΑΣΩ ΒΗΤΑ' },
+    ] },
+  },
+};
+const FR_SEL = (section) => ({ grade: 'Α', section, track: null, kontra: null, extras: [] });
+
+/** The «Φίλοι» rows at a time on Monday 5 October, as text. */
+function friendRows(iso) {
+  state.schedule = FR;
+  state.selection = FR_SEL('Χ1');
+  state.grid = app('buildGrid')(FR, state.selection).grid;
+  const list = document.getElementById('friendsList');
+  list.children.length = 0;
+  app('renderFriends')(app('clockStatus')(FR, new Date(iso)));
+  return list.children.map((li) => li.children[0].innerHTML.replace(/<[^>]+>/g, '|'));
+}
+
+await test('with no friends there is no «Φίλοι» tab at all', async () => {
+  storage.clear();
+  state.friends = [];
+  friendRows('2026-10-05T09:10');
+  assert.equal(document.getElementById('tab-friends').hidden, true, 'a student with no friends saw the tab');
+  state.friends = [{ name: 'Νίκη', selection: FR_SEL('Χ2') }];
+  friendRows('2026-10-05T09:10');
+  assert.equal(document.getElementById('tab-friends').hidden, false);
+  state.friends = [];
+});
+
+await test('a friend\'s hour: their lesson and room, and «Μαζί σου» only in the same room', async () => {
+  state.friends = [{ name: 'Νίκη', selection: FR_SEL('Χ2') }, { name: 'Άρης', selection: FR_SEL('Χ3') }];
+  state.friendsAt = null;
+  let [niki, aris] = friendRows('2026-10-05T09:10');
+  assert.match(niki, /Νίκη/);
+  assert.match(niki, /Ιστορία/);
+  assert.match(niki, /Αίθ\. 2/);
+  assert.match(niki, /ΓΑΜΑ/, 'the teacher goes by surname');
+  assert.doesNotMatch(niki, /Μαζί σου/, 'the same subject in another room is not together');
+  assert.match(aris, /Σχόλασε στις 08:55/);
+  assert.match(document.getElementById('friendsWhen').innerHTML, /Τώρα · 2η ώρα/);
+
+  [niki] = friendRows('2026-10-05T11:00');
+  assert.match(niki, /Φυσική/);
+  assert.match(niki, /Εργ\. Φυσικής/);
+  assert.match(niki, /Μαζί σου/);
+
+  // Between hours: the next one. Before school: when they start.
+  state.friends = [{ name: 'Εγώ', selection: FR_SEL('Χ1') }];
+  assert.match(friendRows('2026-10-05T07:30')[0], /Ξεκινά στις 09:00 \(2η ώρα\)/);
+  assert.match(document.getElementById('friendsWhen').innerHTML, /Επόμενη · 1η ώρα/);
+  assert.match(friendRows('2026-10-05T10:00')[0], /Κενό/);
+  // The week is over: Monday's first hour, and a day with nothing says so.
+  assert.match(friendRows('2026-10-10T12:00')[0], /Ξεκινά στις 09:00/);
+  state.friendsAt = { d: 1, p: 0, pinned: true };
+  assert.match(friendRows('2026-10-05T09:10')[0], /Δεν έχει μάθημα αυτή τη μέρα/);
+  assert.equal(document.getElementById('friendsNow').hidden, false, 'no way back to the clock\'s hour');
+  state.friendsAt = null;
+  state.friends = [];
+});
+
+await test('‹ › walk the hours of the week and wrap round it', async () => {
+  state.schedule = FR;
+  state.selection = FR_SEL('Χ1');
+  state.friends = [{ name: 'Νίκη', selection: FR_SEL('Χ2') }];
+  state.friendsAt = { d: 4, p: FR.periods.length - 1 };
+  app('stepFriends')(1);
+  assert.deepEqual({ ...state.friendsAt }, { d: 0, p: 0 });
+  app('stepFriends')(-1);
+  assert.deepEqual({ ...state.friendsAt }, { d: 4, p: FR.periods.length - 1 });
+  state.friendsAt = null;
+  state.friends = [];
+});
+
+await test('friends are kept as a name and a class; anything malformed is dropped', async () => {
+  storage.clear();
+  state.friends = [{ name: 'Νίκη', selection: FR_SEL('Χ2') }];
+  app('storeFriends')();
+  assert.deepEqual(JSON.parse(JSON.stringify(app('loadFriends')())), state.friends);
+  storage.set(app('KEY_FRIENDS'), JSON.stringify([
+    { name: '  ', selection: FR_SEL('Χ2') }, { name: 'Χωρίς τμήμα', selection: {} },
+    { name: 7, selection: FR_SEL('Χ2') }, null, 'Νίκη',
+    { name: ' Άρης ', selection: { section: 'Χ3', extras: 'όχι λίστα', track: 5 } },
+  ]));
+  assert.deepEqual(JSON.parse(JSON.stringify(app('loadFriends')())),
+    [{ name: 'Άρης', selection: { grade: null, section: 'Χ3', track: null, kontra: null, extras: [] } }]);
+  storage.set(app('KEY_FRIENDS'), '{not json');
+  assert.deepEqual([...app('loadFriends')()], []);
+  state.friends = [];
+  app('storeFriends')();
+  assert.equal(storage.has(app('KEY_FRIENDS')), false, 'an empty list was stored');
+});
+
+await test('adding a friend takes a name and a class, and leaves the student\'s own alone', async () => {
+  storage.clear();
+  state.schedule = FR;
+  state.selection = FR_SEL('Χ1');
+  state.friends = [];
+  const save = document.getElementById('pickerSave');
+  document.getElementById('pickerBody').children.length = 0;
+  app('openFriendPicker')(-1);
+  assert.equal(state.pickerMode, 'friend');
+  assert.equal(document.getElementById('pickerTitle').textContent, 'Πρόσθεσε φίλο/η');
+  assert.equal(state.draft.grade, 'Α', 'a friend starts in the student\'s own year');
+  assert.equal(save.disabled, true);
+  state.draft.section = 'Χ2';
+  app('finishPicker')();
+  assert.equal(save.disabled, true, 'saved without a name');
+  assert.equal(document.getElementById('pickerHint').textContent, 'Γράψε ένα όνομα.');
+  state.draft.name = ' Νίκη ';
+  app('finishPicker')();
+  assert.equal(save.disabled, false);
+  assert.equal(app('commitPicker')(), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(state.friends)), [{ name: 'Νίκη', selection: FR_SEL('Χ2') }]);
+  assert.deepEqual(JSON.parse(storage.get(app('KEY_FRIENDS'))), JSON.parse(JSON.stringify(state.friends)));
+  assert.equal(state.selection.section, 'Χ1', 'the student\'s own class moved');
+  assert.equal(storage.has(app('KEY_SELECTION')), false, 'the student\'s own class was saved over');
+  assert.equal(state.view, 'friends');
+
+  // Changing them keeps their place; the title is their name.
+  app('openFriendPicker')(0);
+  assert.equal(document.getElementById('pickerTitle').textContent, 'Νίκη');
+  state.draft.section = 'Χ3';
+  app('commitPicker')();
+  assert.equal(state.friends.length, 1);
+  assert.equal(state.friends[0].selection.section, 'Χ3');
+  app('setView')('today');
+  state.friends = [];
+  storage.clear();
+});
+
+await test('a friend whose class is gone is asked for again, by name', async () => {
+  state.friends = [{ name: 'Νίκη', selection: FR_SEL('Χ9') }];
+  const [row] = friendRows('2026-10-05T09:10');
+  assert.match(row, /Το τμήμα δεν υπάρχει στο νέο πρόγραμμα/);
+  document.getElementById('friendsList').children[0].children[0].on.click();
+  assert.equal(state.pickerMode, 'friend');
+  assert.equal(state.draft.name, 'Νίκη');
+  assert.equal(state.draft.grade, 'Α');
+  assert.equal(state.draft.section, null);
+  state.friends = [];
+});
+
+await test('a friend\'s week says their group is not set, never that the student did not pick it', async () => {
+  state.schedule = SCHEDULE;
+  const sel = selections.find((x) => !x.track
+    && app('unpickedHours')(SCHEDULE, x).length);
+  assert.ok(sel, 'no selection with an unpicked hour to test');
+  const week = app('friendWeek')({ name: 'Νίκη', selection: sel });
+  const list = document.getElementById('friendWeek');
+  const status = app('clockStatus')(SCHEDULE, new Date('2026-10-10T12:00'));
+  let text = '';
+  for (let d = 0; d < SCHEDULE.days.length; d++) {
+    list.children.length = 0;
+    app('renderDayList')(list, d, status, false, week);
+    text += list.children.map((li) => li.innerHTML).join('');
+  }
+  assert.match(text, /δεν έχει οριστεί ομάδα/);
+  assert.doesNotMatch(text, /δεν έχεις διαλέξει/);
+  assert.equal(week.marks.size, 0);
 });
 
 /* ------------------------------------------------------------------- report */

@@ -204,6 +204,16 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
   white-space: nowrap;
   cursor: pointer;
 }
+/* With «Φίλοι» there are three, and «Αύριο · Παρασκευή» beside the other two
+   ran 13px past a 375px screen. Each takes the room its label needs and the
+   rest is shared; on a phone too narrow even for that, the long one gives up
+   its end to an ellipsis rather than pushing «Φίλοι» off the edge. */
+.tabs--three .tabs__btn {
+  flex: 1 1 auto; min-width: 0;
+  padding: 7px 8px;
+  font-size: .86rem;
+  overflow: hidden; text-overflow: ellipsis;
+}
 .tabs__btn.is-active {
   background: var(--surface);
   border-color: var(--border);
@@ -316,6 +326,38 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
   color: var(--warn);
   font-size: .82rem;
 }
+
+/* ------------------------------------------------------------ friends view */
+
+/* Which hour the list is about, with a step either way. */
+.friends-head { display: flex; align-items: center; gap: 6px; }
+.friends-head .icon-btn { flex: none; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+.friends-head__when { flex: 1; min-width: 0; text-align: center; }
+.friends-head__main { font-size: 1rem; font-weight: 650; letter-spacing: -.01em; }
+.friends-head__sub { font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.friends { display: flex; flex-direction: column; gap: 8px; }
+.friend {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  width: 100%;
+  padding: 10px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.friend__who { display: flex; align-items: baseline; gap: 8px; width: 100%; font-size: .86rem; }
+.friend__who strong { font-weight: 650; }
+.friend__who small { margin-left: auto; font-size: .76rem; color: var(--muted); }
+.friend__subject { font-size: 1.02rem; font-weight: 600; letter-spacing: -.01em; }
+.friend__none { font-size: .95rem; color: var(--muted); }
+.friend__meta { font-size: .85rem; color: var(--muted); }
+
+.friends-foot { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.friend-edit { align-self: flex-start; }
+/* In a sheet the body is a column, where the strip's flex: 1 would stretch it
+   down the screen instead of across. */
+.sheet__body > .daystrip { flex: none; }
 
 /* -------------------------------------------------------------- week view */
 
@@ -468,6 +510,13 @@ table.grid td.is-changed .grid__subject::after { content: " ✎"; color: var(--a
   background: transparent; color: var(--muted); cursor: pointer; font: inherit;
 }
 .changes__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+/* A friend in ⚙: the name opens their class, the ✕ takes them off. */
+.change__open {
+  flex: 1; min-width: 0; padding: 0; border: 0;
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.change__open small { display: block; font-size: .78rem; color: var(--muted); }
+.ghost-btn:disabled { opacity: .45; cursor: not-allowed; }
 
 .more summary { cursor: pointer; font-size: .86rem; font-weight: 550; color: var(--accent-ink); }
 .more[open] summary { margin-bottom: 8px; }

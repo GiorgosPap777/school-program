@@ -64,6 +64,8 @@
           id="tab-today" aria-selected="true" aria-controls="view-today">Σήμερα</button>
   <button type="button" class="tabs__btn" role="tab" data-view="week"
           id="tab-week" aria-selected="false" aria-controls="view-week">Εβδομάδα</button>
+  <button type="button" class="tabs__btn" role="tab" data-view="friends" hidden
+          id="tab-friends" aria-selected="false" aria-controls="view-friends">Φίλοι</button>
 </nav>
 <div id="editBar" class="editbar" hidden>
   <p>✎ Πάτα ένα μάθημα για να το αλλάξεις.</p>
@@ -92,6 +94,23 @@
     </div>
     <ol id="weekList" class="periods"></ol>
     <div id="weekGrid" class="gridwrap" hidden></div>
+  </section>
+
+  <section id="view-friends" class="view" role="tabpanel" aria-labelledby="tab-friends" hidden>
+    <div class="friends-head">
+      <button type="button" id="friendsPrev" class="icon-btn" aria-label="Προηγούμενη ώρα">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+      </button>
+      <div class="friends-head__when" id="friendsWhen" aria-live="polite"></div>
+      <button type="button" id="friendsNext" class="icon-btn" aria-label="Επόμενη ώρα">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+      </button>
+    </div>
+    <ul id="friendsList" class="friends"></ul>
+    <div class="friends-foot">
+      <button type="button" id="friendsNow" class="ghost-btn" hidden>Πίσω στην τωρινή ώρα</button>
+      <button type="button" id="friendsAdd" class="ghost-btn">+ Πρόσθεσε φίλο/η</button>
+    </div>
   </section>
 
 </main>
@@ -131,6 +150,24 @@
     <div class="sheet__foot sheet__foot--row">
       <button type="button" id="editReset" class="ghost-btn" hidden>Επαναφορά</button>
       <button type="button" id="editSave" class="primary-btn">Αποθήκευση</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- A friend's week -->
+<dialog id="friendSheet" class="sheet" aria-labelledby="friendTitle">
+  <div class="sheet__inner">
+    <div class="sheet__bar">
+      <h2 id="friendTitle"></h2>
+      <button type="button" id="friendClose" class="icon-btn" aria-label="Κλείσιμο">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="sheet__body">
+      <p id="friendClasses" class="field__note"></p>
+      <div class="daystrip" id="friendDays" role="tablist" aria-label="Ημέρα"></div>
+      <ol id="friendWeek" class="periods"></ol>
+      <button type="button" id="friendEdit" class="ghost-btn friend-edit">Αλλαγή τμήματος</button>
     </div>
   </div>
 </dialog>

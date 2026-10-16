@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.13.1';
+const APP_VERSION = '1.14.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -24,6 +24,7 @@ const KEY_LAST_CHECK = 'gel7.lastcheck.v1';
 const KEY_PENDING = 'gel7.pending.v1';
 const KEY_CHANGES = 'gel7.changes.v1';
 const KEY_RECALL = 'gel7.recall.v1';
+const KEY_FRIENDS = 'gel7.friends.v1';
 // index.html reads this one too, before anything is drawn — see the <head>.
 const KEY_THEME = 'gel7.theme.v1';
 
@@ -54,6 +55,16 @@ const state = {
   // The changes a new timetable wiped, as a reminder: { section, lead (what
   // happened), kept (how many stayed), items }. See applySchedule().
   recall: null,
+  // Friends' classes, as { name, selection }. See loadFriends().
+  friends: [],
+  // The hour the «Φίλοι» tab shows when the student has stepped off the
+  // clock's — { d, p } with p 0-based — or null to follow the clock.
+  friendsAt: null,
+  // The friend whose week is open, and the day of it showing.
+  friendOpen: -1,
+  friendDay: 0,
+  // Which friend the picker is editing: an index, or -1 for a new one.
+  friendEditing: -1,
   conflicts: [],
   view: 'today',
   weekDay: 0,
@@ -831,6 +842,7 @@ function render() {
   renderDayStrip(status);
   renderDayList($('weekList'), state.weekDay, status);
   renderWeekGrid(status);
+  renderFriends(status);
   renderFooter();
   renderEditing();
 }
@@ -941,19 +953,25 @@ function renderStatusCard(date, status, rolled, listedDay) {
 /** The last hour of a day worth a row. An hour the student emptied still
     gets one, so the change can be seen — and undone. In edit mode every hour
     of the school day does, so a lesson can be added after the last. */
-function lastShownPeriod(dayIdx) {
-  if (state.editing) return state.schedule.periods.length - 1;
-  let last = lastUsedPeriod(state.grid[dayIdx]);
-  for (const key of state.marks.keys()) {
+function lastShownPeriod(dayIdx, week = myWeek()) {
+  if (week.editing) return state.schedule.periods.length - 1;
+  let last = lastUsedPeriod(week.grid[dayIdx]);
+  for (const key of week.marks.keys()) {
     const [d, p] = key.split('-').map(Number);
     if (d === dayIdx) last = Math.max(last, p - 1);
   }
   return last;
 }
 
-function renderDayList(target, dayIdx, status, withHeading) {
-  const row = state.grid[dayIdx];
-  const last = lastShownPeriod(dayIdx);
+/** The student's own week, as renderDayList() draws it. A friend's is the
+    same shape: see friendWeek(). */
+function myWeek() {
+  return { grid: state.grid, baseGrid: state.baseGrid, marks: state.marks, editing: state.editing };
+}
+
+function renderDayList(target, dayIdx, status, withHeading, week = myWeek()) {
+  const row = week.grid[dayIdx];
+  const last = lastShownPeriod(dayIdx, week);
   target.innerHTML = '';
 
   if (withHeading) {
@@ -1015,15 +1033,16 @@ function renderDayList(target, dayIdx, status, withHeading) {
     // The hour is theirs; which room and teacher depends on a group they have
     // not picked yet.
     if (lesson && lesson.unpicked) {
-      instead += '<p class="slot__instead">δεν έχεις διαλέξει ομάδα</p>';
+      instead += `<p class="slot__instead">${week.friend ? 'δεν έχει οριστεί ομάδα'
+        : 'δεν έχεις διαλέξει ομάδα'}</p>`;
     }
 
     // The student's own change: always said, so it is never taken for the
     // school's timetable — by them months later, or by whoever they show it to.
-    const mark = state.marks.get(hourKey(dayIdx, p + 1));
+    const mark = week.marks.get(hourKey(dayIdx, p + 1));
     if (mark) {
       classes.push('slot--changed');
-      const orig = state.baseGrid[dayIdx][p] || null;
+      const orig = week.baseGrid[dayIdx][p] || null;
       instead += `<p class="slot__instead">✎ ${esc(changeNote(mark, orig))}</p>`;
     }
 
@@ -1031,7 +1050,7 @@ function renderDayList(target, dayIdx, status, withHeading) {
     li.className = classes.join(' ');
     li.dataset.d = String(dayIdx);
     li.dataset.p = String(p + 1);
-    if (state.editing) li.tabIndex = 0;
+    if (week.editing) li.tabIndex = 0;
     li.innerHTML = `
       <div class="slot__when">
         <span class="slot__no">${p + 1}η ώρα</span>
@@ -1273,7 +1292,10 @@ function openPicker() {
 
 function renderPicker() {
   const summary = state.pickerMode === 'summary' && !!state.draft.section;
-  $('pickerTitle').textContent = summary ? 'Ρυθμίσεις' : 'Το τμήμα σου';
+  const editing = state.friends[state.friendEditing];
+  $('pickerTitle').textContent = summary ? 'Ρυθμίσεις'
+    : state.pickerMode === 'friend' ? (editing ? editing.name : 'Πρόσθεσε φίλο/η')
+    : 'Το τμήμα σου';
   $('pickerFoot').hidden = summary;
   if (summary) renderSettings();
   else renderClassPicker();
@@ -1318,6 +1340,7 @@ function renderSettings() {
   wrap.appendChild(card);
   body.appendChild(wrap);
 
+  body.appendChild(friendsField());
   body.appendChild(changesField(draft));
 }
 
@@ -1332,6 +1355,16 @@ function renderClassPicker() {
   if (draft.kontra && !kontraOnOffer.has(draft.kontra)) draft.kontra = null;
   const body = $('pickerBody');
   body.innerHTML = '';
+  // The same picker, for a friend's class: their name first, and the notes
+  // below talk about them rather than to them.
+  const friend = state.pickerMode === 'friend';
+  if (friend) {
+    const name = textInput('friendName', 'Όνομα', draft.name, (value) => {
+      draft.name = value;
+      finishPicker();
+    }, true);
+    body.appendChild(name);
+  }
 
   body.appendChild(field('Τάξη', null, model.grades.map((g) => chip({
     text: `${g}΄ Λυκείου`,
@@ -1343,7 +1376,7 @@ function renderClassPicker() {
     },
   }))));
 
-  if (!draft.grade) return finishPicker('Διάλεξε πρώτα τάξη.');
+  if (!draft.grade) return finishPicker();
 
   body.appendChild(field('Τμήμα', null, model.sections.map((s) => chip({
     text: s.label,
@@ -1361,8 +1394,9 @@ function renderClassPicker() {
         onClick: () => { draft.track = draft.track === g.label ? null : g.label; renderPicker(); },
       })));
     }
-    body.appendChild(field('Ομάδα προσανατολισμού',
-      'Διάλεξε την ομάδα που γράφει το πρόγραμμα της σχολής σου.', chips));
+    body.appendChild(field('Ομάδα προσανατολισμού', friend
+      ? 'Προαιρετικό — χωρίς αυτήν, οι ώρες της φαίνονται ως «Ώρα κατεύθυνσης».'
+      : 'Διάλεξε την ομάδα που γράφει το πρόγραμμα της σχολής σου.', chips));
   }
 
   if (model.kontra.size) {
@@ -1376,14 +1410,15 @@ function renderClassPicker() {
       })));
     }
     body.appendChild(field('Μάθημα επιλογής («Κόντρα»)',
-      kontraSubject(draft.track)
+      kontraSubject(draft.track) && !friend
         ? 'Μόνο οι ομάδες που αντιστοιχούν στην κατεύθυνσή σου.'
         : 'Προαιρετικό.', chips));
   }
 
   if (model.extras.length) {
     body.appendChild(field(draft.section ? `Ομάδες του ${draft.section}` : 'Επιπλέον ομάδες',
-      'Προαιρετικό — τσέκαρέ το μόνο αν ανήκεις σε αυτή την ομάδα.',
+      friend ? 'Προαιρετικό — μόνο αν ανήκει σε αυτή την ομάδα.'
+        : 'Προαιρετικό — τσέκαρέ το μόνο αν ανήκεις σε αυτή την ομάδα.',
       model.extras.map((g) => chip({
         text: g.label,
         sub: g.name || g.track,
@@ -1396,10 +1431,11 @@ function renderClassPicker() {
       }))));
   }
 
-  finishPicker(draft.section ? '' : 'Διάλεξε τμήμα για να συνεχίσεις.');
+  finishPicker();
 }
 
 function commitPicker() {
+  if (state.pickerMode === 'friend') return commitFriend();
   if (!state.draft.section) return false;
   state.selection = state.draft;
   save(KEY_SELECTION, state.selection);
@@ -1699,9 +1735,14 @@ function resetEdit() {
   render();
 }
 
-function finishPicker(hint) {
-  $('pickerHint').textContent = hint;
-  $('pickerSave').disabled = !state.draft.section;
+/** What the picker is still waiting for, and whether it can be saved. */
+function finishPicker() {
+  const draft = state.draft;
+  const named = state.pickerMode !== 'friend' || !!(draft.name || '').trim();
+  $('pickerHint').textContent = !draft.grade ? 'Διάλεξε πρώτα τάξη.'
+    : !draft.section ? 'Διάλεξε τμήμα για να συνεχίσεις.'
+    : !named ? 'Γράψε ένα όνομα.' : '';
+  $('pickerSave').disabled = !draft.section || !named;
 }
 
 function field(label, note, children) {
@@ -1750,6 +1791,278 @@ function pruneSelection(selection, schedule) {
     && !schedule.groups[id].coteach
     && (!schedule.groups[id].parent || reachable.has(schedule.groups[id].parent)));
   return next.section ? next : null;
+}
+
+/* ------------------------------------------------------------------ friends */
+
+/** Friends' classes, kept on this phone only: a name the student typed and
+    the groups they picked for them, nothing else. Nothing is sent anywhere —
+    a friend is added by picking their class, the same way as one's own. The
+    selection is kept as it was picked, and checked against the timetable each
+    time it is drawn (friendWeek()), so a new PDF that drops a friend's class
+    asks for it again instead of quietly losing them. */
+const MAX_FRIENDS = 40;
+
+function loadFriends() {
+  const saved = load(KEY_FRIENDS, null);
+  if (!Array.isArray(saved)) return [];
+  const text = (v) => (typeof v === 'string' ? v : null);
+  const out = [];
+  for (const f of saved) {
+    const name = f && text(f.name) && f.name.trim().slice(0, 40);
+    const sel = f && f.selection;
+    if (!name || !sel || typeof sel !== 'object' || !text(sel.section)) continue;
+    out.push({ name, selection: {
+      grade: text(sel.grade), section: sel.section, track: text(sel.track), kontra: text(sel.kontra),
+      extras: Array.isArray(sel.extras) ? sel.extras.filter((x) => typeof x === 'string') : [],
+    } });
+  }
+  return out.slice(0, MAX_FRIENDS);
+}
+
+function storeFriends() {
+  if (state.friends.length) save(KEY_FRIENDS, state.friends);
+  else localStorage.removeItem(KEY_FRIENDS);
+}
+
+/** A friend's week as renderDayList() draws it: the school's timetable for
+    their groups, with none of their own changes — those stay on their phone.
+    Null when their class is not in this timetable any more. */
+function friendWeek(friend) {
+  const selection = friend && pruneSelection(friend.selection, state.schedule);
+  if (!selection) return null;
+  const grid = buildGrid(state.schedule, selection).grid;
+  return { grid, baseGrid: grid, marks: new Map(), editing: false, friend: true, selection };
+}
+
+/** The hour the «Φίλοι» tab is about: the one running now, else the next one
+    today, else the first of the next school day — or wherever ‹ › moved it. */
+function friendsMoment(status) {
+  if (state.friendsAt) return { ...state.friendsAt, pinned: true };
+  const days = state.schedule.days.length;
+  if (status.schoolDay && status.current >= 0) return { d: status.dayIdx, p: status.current, live: true };
+  if (status.schoolDay && status.next >= 0) return { d: status.dayIdx, p: status.next };
+  return { d: status.schoolDay ? (status.dayIdx + 1) % days : 0, p: 0 };
+}
+
+function stepFriends(delta) {
+  const at = friendsMoment(clockStatus(state.schedule, now()));
+  const n = state.schedule.periods.length;
+  const all = state.schedule.days.length * n;
+  const i = (((at.d * n + at.p + delta) % all) + all) % all;
+  state.friendsAt = { d: Math.floor(i / n), p: i % n };
+  render();
+}
+
+/** «Τώρα · 3η ώρα», «Αύριο · Πέμπτη · 1η ώρα» … and the bell times under it. */
+function friendsWhen(status, at) {
+  const period = state.schedule.periods[at.p];
+  const hour = `${at.p + 1}η ώρα`;
+  const today = status.schoolDay && at.d === status.dayIdx;
+  const main = at.live ? `Τώρα · ${hour}`
+    : today ? `${at.pinned ? 'Σήμερα' : 'Επόμενη'} · ${hour}`
+    : `${dayHeading(status, at.d)} · ${hour}`;
+  return `<p class="friends-head__main">${esc(main)}</p>`
+    + `<p class="friends-head__sub">${esc(period.start)}–${esc(period.end)}</p>`;
+}
+
+/** What a friend has in one hour, as a line or two. `mine` is the student's
+    own lesson then, for «Μαζί σου». */
+function friendHour(week, at, status, mine) {
+  const periods = state.schedule.periods;
+  const row = week.grid[at.d];
+  const lesson = row[at.p];
+  if (lesson) {
+    const room = lessonRoom(lesson);
+    const meta = [room, lesson.teacher && surname(lesson.teacher)].filter(Boolean);
+    if (lesson.unpicked) meta.push('δεν έχει οριστεί ομάδα');
+    // The same lesson in the same place with the same teacher is the same
+    // room full of people, whichever groups the two of them came through.
+    // With no room to go by (Γυμναστική), only the same group says so.
+    const together = !!(mine && !mine.unpicked && !lesson.unpicked
+      && mine.subject === lesson.subject && lessonRoom(mine) === room
+      && (mine.teacher || '') === (lesson.teacher || '')
+      && (room || mine.group === lesson.group));
+    return { subject: lesson.subject, meta, together };
+  }
+  const first = row.findIndex(Boolean);
+  const last = lastUsedPeriod(row);
+  if (first < 0) return { none: 'Δεν έχει μάθημα αυτή τη μέρα', meta: [] };
+  if (at.p < first) return { none: `Ξεκινά στις ${periods[first].start} (${first + 1}η ώρα)`, meta: [] };
+  if (at.p > last) {
+    const gone = status.schoolDay && at.d === status.dayIdx && status.mins >= hm(periods[last].end);
+    return { none: `${gone ? 'Σχόλασε' : 'Σχολάει'} στις ${periods[last].end}`, meta: [] };
+  }
+  return { none: 'Κενό', meta: [] };
+}
+
+/** The «Φίλοι» tab. It is not there at all until a friend has been added. */
+function renderFriends(status) {
+  const has = state.friends.length > 0;
+  $('tab-friends').hidden = !has;
+  $('tabs').classList.toggle('tabs--three', has);
+  if (!has) {
+    state.friendsAt = null;
+    if (state.view === 'friends') setView('today');
+    return;
+  }
+  const at = friendsMoment(status);
+  $('friendsWhen').innerHTML = friendsWhen(status, at);
+  $('friendsNow').hidden = !at.pinned;
+  const mine = state.grid[at.d] ? state.grid[at.d][at.p] : null;
+
+  const list = $('friendsList');
+  list.innerHTML = '';
+  state.friends.forEach((friend, i) => {
+    const week = friendWeek(friend);
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'friend';
+    const who = `<span class="friend__who"><strong>${esc(friend.name)}</strong>`
+      + `<small>${esc(week ? selectedGroupIds(week.selection).join(' · ') : friend.selection.section)}</small></span>`;
+    if (!week) {
+      btn.innerHTML = who + '<span class="friend__none">Το τμήμα δεν υπάρχει στο νέο πρόγραμμα</span>'
+        + '<span class="friend__meta">Πάτα για να το διαλέξεις ξανά</span>';
+      btn.addEventListener('click', () => openFriendPicker(i));
+    } else {
+      const h = friendHour(week, at, status, mine);
+      btn.innerHTML = who
+        + (h.none ? `<span class="friend__none">${esc(h.none)}</span>`
+          : `<span class="friend__subject">${esc(h.subject)}</span>`)
+        + (h.meta.length ? `<span class="friend__meta">${h.meta.map(esc).join(' · ')}</span>` : '')
+        + (h.together ? '<span class="tag tag--next">Μαζί σου</span>' : '');
+      btn.addEventListener('click', () => openFriendSheet(i, at.d));
+    }
+    li.appendChild(btn);
+    list.appendChild(li);
+  });
+  if ($('friendSheet').open) renderFriendSheet(status);
+}
+
+function openFriendSheet(i, day) {
+  state.friendOpen = i;
+  state.friendDay = day;
+  renderFriendSheet(clockStatus(state.schedule, now()));
+  $('friendSheet').showModal();
+}
+
+/** One friend's week, a day at a time: the same rows as the student's own. */
+function renderFriendSheet(status) {
+  const friend = state.friends[state.friendOpen];
+  const week = friend && friendWeek(friend);
+  if (!week) {
+    $('friendSheet').close();
+    return;
+  }
+  $('friendTitle').textContent = friend.name;
+  // Their own changes, if they made any, are on their phone and not here.
+  $('friendClasses').textContent = `${selectedGroupIds(week.selection).join(' · ')}`
+    + ' · όπως στο πρόγραμμα του σχολείου';
+  const strip = $('friendDays');
+  strip.innerHTML = '';
+  state.schedule.days.forEach((name, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'daystrip__btn'
+      + (i === state.friendDay ? ' is-active' : '')
+      + (status.schoolDay && i === status.dayIdx ? ' is-today' : '');
+    btn.textContent = DAY_SHORT[i] || name;
+    btn.setAttribute('aria-label', name);
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', String(i === state.friendDay));
+    btn.addEventListener('click', () => {
+      state.friendDay = i;
+      renderFriendSheet(clockStatus(state.schedule, now()));
+    });
+    strip.appendChild(btn);
+  });
+  renderDayList($('friendWeek'), state.friendDay, status, false, week);
+}
+
+/** «Φίλοι» in the ⚙ sheet: the way in for a student with none yet, and
+    where one is changed or taken off. */
+function friendsField() {
+  const wrap = document.createElement('div');
+  wrap.className = 'field';
+  wrap.innerHTML = '<p class="field__label">Φίλοι</p>'
+    + '<p class="field__note">Δες τι μάθημα και σε ποια αίθουσα έχουν οι φίλοι σου.'
+    + ' Διαλέγεις το τμήμα τους όπως το δικό σου· μένουν μόνο σε αυτό το κινητό.</p>';
+  if (state.friends.length) {
+    const list = document.createElement('ul');
+    list.className = 'changes';
+    state.friends.forEach((friend, i) => {
+      const li = document.createElement('li');
+      li.className = 'change';
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'change__open';
+      const sel = pruneSelection(friend.selection, state.schedule);
+      open.innerHTML = `<strong>${esc(friend.name)}</strong><small>${esc(sel
+        ? selectedGroupIds(sel).join(' · ') : 'το τμήμα δεν υπάρχει στο νέο πρόγραμμα')}</small>`;
+      open.addEventListener('click', () => openFriendPicker(i));
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'change__del';
+      del.setAttribute('aria-label', `Αφαίρεσε: ${friend.name}`);
+      del.textContent = '✕';
+      del.addEventListener('click', () => {
+        state.friends.splice(i, 1);
+        storeFriends();
+        render();
+        renderPicker();
+      });
+      li.appendChild(open);
+      li.appendChild(del);
+      list.appendChild(li);
+    });
+    wrap.appendChild(list);
+  }
+  const actions = document.createElement('div');
+  actions.className = 'changes__actions';
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'ghost-btn';
+  add.textContent = '+ Πρόσθεσε φίλο/η';
+  add.disabled = state.friends.length >= MAX_FRIENDS;
+  add.addEventListener('click', () => openFriendPicker(-1));
+  actions.appendChild(add);
+  wrap.appendChild(actions);
+  return wrap;
+}
+
+/** The class picker, for a friend: `i` is which one, or -1 for a new one —
+    who most likely sits in the student's own year, so that is where it starts. */
+function openFriendPicker(i) {
+  if (!state.schedule) return;
+  const friend = state.friends[i];
+  const sel = friend && (pruneSelection(friend.selection, state.schedule)
+    || { grade: friend.selection.grade, section: null, track: null, kontra: null, extras: [] });
+  state.friendEditing = friend ? i : -1;
+  state.draft = sel
+    ? { name: friend.name, ...sel, extras: [...(sel.extras || [])] }
+    : { name: '', grade: (state.selection && state.selection.grade) || null,
+        section: null, track: null, kontra: null, extras: [] };
+  state.pickerMode = 'friend';
+  if ($('friendSheet').open) $('friendSheet').close();
+  renderPicker();
+  if (!$('picker').open) $('picker').showModal();
+}
+
+function commitFriend() {
+  const draft = state.draft;
+  const name = (draft.name || '').trim().slice(0, 40);
+  if (!draft.section || !name) return false;
+  const friend = { name, selection: { grade: draft.grade, section: draft.section,
+    track: draft.track, kontra: draft.kontra, extras: [...(draft.extras || [])] } };
+  if (state.friends[state.friendEditing]) state.friends[state.friendEditing] = friend;
+  else if (state.friends.length < MAX_FRIENDS) state.friends.push(friend);
+  storeFriends();
+  state.friendEditing = -1;
+  $('picker').close();
+  render();
+  setView('friends');
+  return true;
 }
 
 /* ------------------------------------------------------------------- themes */
@@ -2346,6 +2659,7 @@ function setView(view) {
   state.view = view;
   $('view-today').hidden = view !== 'today';
   $('view-week').hidden = view !== 'week';
+  $('view-friends').hidden = view !== 'friends';
   document.querySelectorAll('.tabs__btn').forEach((btn) => {
     const on = btn.dataset.view === view;
     btn.classList.toggle('is-active', on);
@@ -2364,7 +2678,20 @@ function wire() {
   $('themeClose').addEventListener('click', () => $('themeSheet').close());
   $('iosClose').addEventListener('click', () => $('iosSheet').close());
 
+  $('friendsPrev').addEventListener('click', () => stepFriends(-1));
+  $('friendsNext').addEventListener('click', () => stepFriends(1));
+  $('friendsNow').addEventListener('click', () => { state.friendsAt = null; render(); });
+  $('friendsAdd').addEventListener('click', () => openFriendPicker(-1));
+  $('friendClose').addEventListener('click', () => $('friendSheet').close());
+  $('friendEdit').addEventListener('click', () => openFriendPicker(state.friendOpen));
+
   $('pickerSave').addEventListener('click', commitPicker);
+  // Enter in a friend's name — the keyboard's «Go» — submits the form, and a
+  // method="dialog" form closes on that with nothing saved. Save instead.
+  $('pickerForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!$('pickerSave').disabled) commitPicker();
+  });
 
   $('editDone').addEventListener('click', () => setEditing(false));
   $('editClose').addEventListener('click', () => $('editSheet').close());
@@ -2459,6 +2786,7 @@ async function start() {
   state.selection = pruneSelection(load(KEY_SELECTION, null), state.schedule);
   state.changes = loadChanges(state.schedule);
   state.recall = loadRecall();
+  state.friends = loadFriends();
 
   if (!state.selection) {
     openPicker();
