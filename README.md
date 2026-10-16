@@ -250,7 +250,7 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 ```
 
 `kind` is one of `section` (Α1, Β3, Γ2 …), `track` (Βθ1, Γοικ2, Γθετικό …),
-`kontra` (Γ' electives) or `extra` (τμήμα ένταξης, second foreign language and
+`kontra` (Γ' κόντρα groups) or `extra` (τμήμα ένταξης, second foreign language and
 similar). An `extra` may also carry `"parent": "Α2"` — the group it belongs to,
 a class or an orientation (Γοικ2εν sits in on Γοικ2's Οικονομία) — and then one
 of two flags: `"parallel": true` says it splits that class for one
@@ -269,7 +269,7 @@ so nothing is shown until `groupRooms` says where the French group goes.
 the timetable can name, so no room is shown for it at all. `hidden` groups are kept in the
 file but never offered in the picker — that flag is the converter's decision and
 the app does not second-guess it, which is what keeps an empty-but-real κόντρα
-elective on offer while an empty section stays hidden.
+group on offer while an empty section stays hidden.
 
 The picker is built entirely by grouping over `groups` — no class list is
 hardcoded anywhere — so a new section or orientation next term appears on its own.
@@ -284,6 +284,15 @@ keeps the changes in view without scrolling past every chip, and leaves room for
 more settings later. With nothing saved yet (first run, or a class that a new
 timetable dropped) ⚙ goes straight to the picker.
 
+Every sheet (⚙, the colours, «Φίλοι», an hour being changed, the iPhone install
+steps) also closes when the dimmed screen around it is tapped, the same as ✕,
+so a sheet left open does not look like the app has frozen. Only a tap that
+starts as well as ends out there counts. A finger that scrolled the sheet, or a
+text selection dragged past its edge, also ends with a click on the dialog, and
+that must not close it. The one exception is the picker before any class is
+saved: there is nothing behind it yet, and closing it would only open it again,
+empty.
+
 ### How the merge works
 
 A Β' or Γ' section's page deliberately leaves periods free for the orientation
@@ -291,11 +300,13 @@ track to fill (Β' leaves period 3; Γ' leaves 2–5). Merging is therefore a un
 the selected groups' lessons. Where two selected groups do claim the same slot, the
 app keeps **both** and marks the slot «Σύγκρουση» rather than silently dropping one.
 
-Saving without an orientation group, or without a κόντρα, is allowed. Those
-hours are not shown as «Κενό», though: every group of that kind in a grade meets
-at the same hours, so the app fills them with «Ώρα κατεύθυνσης» (or the κόντρα
-subject, «Ιστορία (Κόντρα)», when the orientation says which) and «δεν έχεις
-διαλέξει ομάδα». «Κενό · Τώρα» through an orientation hour could send a student
+The κόντρα is compulsory, not an elective, so the picker calls it «Ομάδα
+κόντρα» and asks for it the way it asks for the orientation group, not as
+«Προαιρετικό». Saving without an orientation group, or without a κόντρα, is
+still allowed. Those hours are not shown as «Κενό», though: every group of that
+kind in a grade meets at the same hours, so the app fills them with «Ώρα
+κατεύθυνσης» or «Ώρα κόντρα» (or the κόντρα subject, «Ιστορία (Κόντρα)», when
+the orientation says which) and «δεν έχεις διαλέξει ομάδα». «Κενό · Τώρα» through an orientation hour could send a student
 home.
 
 Two kinds of group are exceptions, and both hang off `parent`.
@@ -663,11 +674,11 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
   `hideRooms.labels` in `tools/aliases.json`; the lessons keep their subject and
   teacher. Remove the code from that list to start showing it again. `ΕΠ`
   (Εργαστήριο Πληροφορικής) is the only room the PDF itself supplies today.
-- **Groups with no lessons are hidden — except «κόντρα» electives.** The current
+- **Groups with no lessons are hidden — except «κόντρα» groups.** The current
   PDF has pages for 8 groups that carry no lessons, including Γ6 and Γ7, which
   are not real classes and were exported by accident. They stay in
   `schedule.json` (so a later revision that fills them just works) but the picker
-  never offers them. A κόντρα elective is the exception: it is a real, active
+  never offers them. A κόντρα group is the exception: it is a real, active
   class that simply may have no hour in a given week, so it is always offered.
   Hide one by name via `excludeGroups.labels` if it genuinely does not exist.
 - To suppress a group that *does* have lessons but should not be offered, add its

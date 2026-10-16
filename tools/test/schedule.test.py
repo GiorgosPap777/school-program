@@ -78,7 +78,7 @@ def main(path):
                     "%s teaches two lessons at %s/%s" % (name, l["d"], l["p"])
                 seen[key] = l
 
-    @check("every section + track + elective combination merges without collision")
+    @check("every section + track + κόντρα combination merges without collision")
     def _():
         clashes = []
         for sec_name, sec in sections.items():
@@ -112,7 +112,7 @@ def main(path):
                 assert 20 <= len(slots) <= 35, \
                     "%s has %d hours a week, which is out of range" % (label, len(slots))
 
-    @check("empty groups are hidden, except the «κόντρα» electives")
+    @check("empty groups are hidden, except the «κόντρα» groups")
     def _():
         for name, g in groups.items():
             if g["lessons"] or g["kind"] == "kontra":
@@ -158,7 +158,7 @@ def main(path):
     def _():
         # The school's noticeboard gives a home classroom to every section and
         # every orientation group, so those must have one the moment they have
-        # an hour. A «κόντρα» elective with no hour this week has nowhere to be
+        # an hour. A «κόντρα» group with no hour this week has nowhere to be
         # yet; and a τμήμα ένταξης has none of its own because nobody moves —
         # the app reads it off the class, so what must hold there is that the
         # class has one. A lesson with no room at all is the bug this guards

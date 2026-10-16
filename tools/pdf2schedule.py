@@ -689,7 +689,7 @@ def build(pdf_path: str, args) -> tuple:
         excluded = label in norm.excluded
         kind = info.get("kind", "extra")
         # A page with no lessons is normally a group nobody attends. «Κόντρα»
-        # electives are the exception: they are real classes that simply may
+        # groups are the exception: they are real classes that simply may
         # not meet in a given week, so they stay on offer. Hide one by name in
         # aliases.json -> excludeGroups if it genuinely does not exist.
         hidden = excluded or (not lessons and kind != "kontra")

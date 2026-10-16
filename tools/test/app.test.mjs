@@ -334,7 +334,7 @@ await test('an hour of a group not picked yet says what it is', async () => {
     [pick('Χθ', null), '2026-10-05T10:00', 'Φυσική Π'],
     // Which κόντρα subject is known from the orientation; without one it is not.
     [pick('Χθ', null), '2026-10-06T09:10', 'Ιστορία (Κόντρα)'],
-    [pick(null, null), '2026-10-06T09:10', 'Μάθημα επιλογής (Κόντρα)'],
+    [pick(null, null), '2026-10-06T09:10', 'Ώρα κόντρα'],
     [pick('Χθ', 'Χιστ'), '2026-10-06T09:10', 'Ιστορία'],
   ];
   for (const [sel, iso, want] of cases) {
@@ -1244,6 +1244,34 @@ await test('a friend\'s week says their group is not set, never that the student
   assert.match(text, /δεν έχει οριστεί ομάδα/);
   assert.doesNotMatch(text, /δεν έχεις διαλέξει/);
   assert.equal(week.marks.size, 0);
+});
+
+/* ------------------------------------------------------------------- sheets */
+
+await test('a tap beside a sheet closes it; one that starts or ends on it does not', async () => {
+  const at = (target, x, y) => ({ target, clientX: x, clientY: y });
+  const tap = (sheet, down, up) => { sheet.on.pointerdown(down); sheet.on.click(up); };
+  for (const id of ['picker', 'editSheet', 'themeSheet', 'iosSheet', 'friendSheet']) {
+    const sheet = document.getElementById(id);
+    let closed = 0;
+    sheet.close = () => { closed++; };
+    // A bottom sheet on a 375×812 phone, the top half dimmed.
+    sheet.getBoundingClientRect = () => ({ left: 0, right: 375, top: 400, bottom: 812 });
+    state.selection = FR_SEL('Χ1');
+    tap(sheet, at(sheet, 180, 120), at(sheet, 180, 120));
+    assert.equal(closed, 1, `${id}: a tap on the dimmed screen left it open`);
+    const inside = { tagName: 'BUTTON' };
+    tap(sheet, at(inside, 180, 600), at(inside, 180, 600));
+    // Scrolling the sheet or dragging a selection out of it ends on the dialog.
+    tap(sheet, at(inside, 180, 600), at(sheet, 180, 120));
+    tap(sheet, at(sheet, 180, 600), at(sheet, 180, 600));
+    assert.equal(closed, 1, `${id}: closed by a tap that was not beside it`);
+    // Nothing to go back to before a class is saved: the picker stays.
+    state.selection = null;
+    tap(sheet, at(sheet, 180, 120), at(sheet, 180, 120));
+    assert.equal(closed, id === 'picker' ? 1 : 2, `${id}: wrong call with no class saved`);
+    sheet.close = () => {};
+  }
 });
 
 /* ------------------------------------------------------------------- report */

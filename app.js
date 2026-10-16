@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.14.1';
+const APP_VERSION = '1.14.2';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -386,7 +386,7 @@ function unpickedHours(schedule, selection) {
     const theirs = kontra.filter((g) => g.track === wanted);
     // Same fallback as the picker: a mapping that matches nothing means every group.
     if (theirs.length) add(theirs, wanted);
-    else add(kontra, 'Μάθημα επιλογής (Κόντρα)');
+    else add(kontra, 'Ώρα κόντρα');
   }
   return hours;
 }
@@ -1226,7 +1226,7 @@ function pickerModel(grade, chosen) {
   const all = Object.values(state.schedule.groups);
   // `hidden` is the converter's call and the only one: it already knows that an
   // empty page is usually a class exported by mistake, but that an empty
-  // «κόντρα» elective is a real class that just has no hour this week. Second-
+  // «κόντρα» group is a real class that just has no hour this week. Second-
   // guessing it here is how a valid group silently disappears from the picker.
   const offered = (g) => !g.hidden;
   // An extra that splits one class — the French half of Α2, its second English
@@ -1409,10 +1409,15 @@ function renderClassPicker() {
         onClick: () => { draft.kontra = draft.kontra === g.label ? null : g.label; renderPicker(); },
       })));
     }
-    body.appendChild(field('Μάθημα επιλογής («Κόντρα»)',
-      kontraSubject(draft.track) && !friend
-        ? 'Μόνο οι ομάδες που αντιστοιχούν στην κατεύθυνσή σου.'
-        : 'Προαιρετικό.', chips));
+    // The κόντρα is compulsory, not an elective: which subject it is follows
+    // from the orientation, and the group from the school's timetable. Saving
+    // without one is still allowed, as for the orientation — its hours are
+    // then marked as unpicked rather than left blank.
+    body.appendChild(field('Ομάδα κόντρα', friend
+      ? 'Προαιρετικό — χωρίς αυτήν, οι ώρες της φαίνονται χωρίς αίθουσα.'
+      : kontraSubject(draft.track)
+        ? 'Διάλεξε την ομάδα σου. Φαίνονται μόνο όσες αντιστοιχούν στην κατεύθυνσή σου.'
+        : 'Διάλεξε την ομάδα σου.', chips));
   }
 
   if (model.extras.length) {
@@ -2638,6 +2643,27 @@ function setView(view) {
   });
 }
 
+/** A tap on the dimmed screen around a sheet closes it, as ✕ does: a sheet
+    that stays up while the student taps the timetable behind it looks stuck.
+    Only a tap that starts out there as well as ending there — a finger that
+    scrolled the sheet, or a selection dragged past its edge, also ends with a
+    click on the dialog itself. Taps on the dimmed area are the dialog's own:
+    the backdrop has no element of its own to be the target. */
+function closeOnBackdrop(dialog, allowed = () => true) {
+  const outside = (event) => {
+    if (event.target !== dialog) return false;
+    const r = dialog.getBoundingClientRect();
+    return event.clientX < r.left || event.clientX > r.right
+      || event.clientY < r.top || event.clientY > r.bottom;
+  };
+  let started = false;
+  dialog.addEventListener('pointerdown', (event) => { started = outside(event); });
+  dialog.addEventListener('click', (event) => {
+    if (started && outside(event) && allowed()) dialog.close();
+    started = false;
+  });
+}
+
 function wire() {
   document.querySelectorAll('.tabs__btn').forEach((btn) => {
     btn.addEventListener('click', () => setView(btn.dataset.view));
@@ -2676,10 +2702,14 @@ function wire() {
     $(id).addEventListener('keydown', onSlotTap);
   }
 
-  // Closing the picker with Esc or the backdrop must not leave a blank app.
+  // Closing the picker with Esc must not leave a blank app.
   $('picker').addEventListener('close', () => {
     if (!state.selection) openPicker();
   });
+  // A stray tap beside the first-run picker would only open it again, empty,
+  // so that one stays until a class is saved.
+  closeOnBackdrop($('picker'), () => !!state.selection);
+  for (const id of ['editSheet', 'themeSheet', 'iosSheet', 'friendSheet']) closeOnBackdrop($(id));
 
   $('gridToggle').addEventListener('click', () => {
     state.showGrid = !state.showGrid;
