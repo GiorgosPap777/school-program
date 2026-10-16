@@ -279,7 +279,7 @@ orientation out of that table and it is offered all of them.
 
 Once a class is saved, ⚙ («Ρυθμίσεις») opens on a summary instead: the class in
 a few lines (τμήμα, τάξη, orientation, κόντρα, groups) with an «Αλλαγή τμήματος»
-button that brings up the full picker, followed by «Φίλοι» and «Δικές σου αλλαγές». That
+button that brings up the full picker, followed by «Δικές σου αλλαγές». That
 keeps the changes in view without scrolling past every chip, and leaves room for
 more settings later. With nothing saved yet (first run, or a class that a new
 timetable dropped) ⚙ goes straight to the picker.
@@ -474,39 +474,40 @@ the student has set.
 
 A student can see what lesson their friends have, and where.
 
-**Ordinary students see nothing new** apart from one more section in the ⚙
-sheet: «Φίλοι», with «+ Πρόσθεσε φίλο/η». The «Φίλοι» tab only appears once a
-friend has been added, and it goes away when the last one is removed.
+The way in is a people icon in the top bar, beside the colours button. It opens
+a «Φίλοι» sheet, so the tabs stay at two and nothing on the timetable changes.
+A third tab was tried first. With «Αύριο · Παρασκευή» beside «Εβδομάδα» and
+«Φίλοι» it ran off a 375px screen, and it crowded the bar for every student.
+With no friends yet, the sheet says what it is for and offers «+ Πρόσθεσε
+φίλο/η».
 
 A friend is added the same way as one's own class: the same picker, with a
-name field at the top, starting at the student's own year. Orientation, κόντρα
-and groups are optional; an orientation hour that is left unset reads «Ώρα
-κατεύθυνσης» with «δεν έχει οριστεί ομάδα» under it. Nothing is sent anywhere,
-and nothing needs a connection. Friends live on the phone only, in
-`gel7.friends.v1`, as `{ name, selection }`. A link to share one's own class
-was left out on purpose. On an iPhone, a link opens in Safari, and Safari does
-not share storage with the app installed to the home screen, so the friend
+name field at the top, starting at the student's own year. Enter in the name
+field saves, instead of closing the `method="dialog"` form with nothing kept.
+Orientation, κόντρα and groups are optional. An orientation hour that is left
+unset reads «Ώρα κατεύθυνσης», with «δεν έχει οριστεί ομάδα» under it. Nothing
+is sent anywhere, and nothing needs a connection. Friends live on the phone
+only, in `gel7.friends.v1`, as `{ name, selection }`. A link to share one's own
+class was left out on purpose. On an iPhone, a link opens in Safari, and Safari
+does not share storage with the app installed to the home screen, so the friend
 would land in the wrong place.
 
-The «Φίλοι» tab is about one hour at a time: the one running now, otherwise
-the next one today, otherwise the first hour of the next school day. ‹ › step
-through the week, and «Πίσω στην τωρινή ώρα» returns to the clock. Each friend
-gets a row with their lesson, room and teacher's surname. When they have no
-lesson, the row says why: «Κενό», «Ξεκινά στις 09:00 (2η ώρα)», or «Σχόλασε
-στις 12:30». «Μαζί σου» marks a friend in the same lesson with the same teacher
-in the same room. Γυμναστική has no room to go by, so there it takes the same
-group. Tapping a friend opens their week, a day at a time, with the same rows
-as one's own.
+The sheet shows one hour at a time: the one running now, otherwise the next one
+today, otherwise the first hour of the next school day. ‹ › step through the
+week, and «Πίσω στην τωρινή ώρα» returns to the clock. Each friend gets a row
+with their lesson, room and teacher's surname. When they have no lesson, the
+row says why: «Κενό», «Ξεκινά στις 09:00 (2η ώρα)», or «Σχόλασε στις 12:30».
+«Μαζί σου» marks a friend in the same lesson with the same teacher in the same
+room. Γυμναστική has no room to go by, so there it takes the same group.
+Tapping a friend shows their week in the same sheet, a day at a time, with the
+same rows as one's own. From there, ‹ goes back, and «Αλλαγή τμήματος» and
+«Αφαίρεση» edit or remove them.
 
 What is shown is the school's timetable for their groups. Their own changes
 stay on their phone. The saved selection is checked against the timetable each
 time it is drawn, so a new PDF that drops a friend's class leaves them on the
 list with «Το τμήμα δεν υπάρχει στο νέο πρόγραμμα — πάτα για να το διαλέξεις
 ξανά» rather than deleting them.
-
-With three tabs, «Αύριο · Παρασκευή» did not fit beside the other two on a
-375px phone. `.tabs--three` tightens the tabs only when «Φίλοι» is showing, and
-lets the longest label end in an ellipsis on anything narrower than 360px.
 
 ---
 

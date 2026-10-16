@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.14.0';
+const APP_VERSION = '1.14.1';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -57,10 +57,11 @@ const state = {
   recall: null,
   // Friends' classes, as { name, selection }. See loadFriends().
   friends: [],
-  // The hour the «Φίλοι» tab shows when the student has stepped off the
+  // The hour the «Φίλοι» sheet shows when the student has stepped off the
   // clock's — { d, p } with p 0-based — or null to follow the clock.
   friendsAt: null,
-  // The friend whose week is open, and the day of it showing.
+  // The friend whose week the sheet is showing (-1: all of them, at one
+  // hour), and the day of it showing.
   friendOpen: -1,
   friendDay: 0,
   // Which friend the picker is editing: an index, or -1 for a new one.
@@ -842,7 +843,7 @@ function render() {
   renderDayStrip(status);
   renderDayList($('weekList'), state.weekDay, status);
   renderWeekGrid(status);
-  renderFriends(status);
+  if ($('friendSheet').open) renderFriendSheet(status);
   renderFooter();
   renderEditing();
 }
@@ -1340,7 +1341,6 @@ function renderSettings() {
   wrap.appendChild(card);
   body.appendChild(wrap);
 
-  body.appendChild(friendsField());
   body.appendChild(changesField(draft));
 }
 
@@ -1835,8 +1835,8 @@ function friendWeek(friend) {
   return { grid, baseGrid: grid, marks: new Map(), editing: false, friend: true, selection };
 }
 
-/** The hour the «Φίλοι» tab is about: the one running now, else the next one
-    today, else the first of the next school day — or wherever ‹ › moved it. */
+/** The hour the «Φίλοι» sheet is about: the one running now, else the next
+    one today, else the first of the next school day — or wherever ‹ › moved it. */
 function friendsMoment(status) {
   if (state.friendsAt) return { ...state.friendsAt, pinned: true };
   const days = state.schedule.days.length;
@@ -1896,14 +1896,41 @@ function friendHour(week, at, status, mine) {
   return { none: 'Κενό', meta: [] };
 }
 
-/** The «Φίλοι» tab. It is not there at all until a friend has been added. */
+/** «Φίλοι», from the people button beside the colours: every friend at one
+    hour, or one friend's week. Nothing of it is anywhere else in the app. */
+function openFriends(i = -1) {
+  if (!state.schedule || !state.selection) return;
+  state.friendOpen = i;
+  renderFriendSheet(clockStatus(state.schedule, now()));
+  if (!$('friendSheet').open) $('friendSheet').showModal();
+}
+
+function renderFriendSheet(status) {
+  const friend = state.friends[state.friendOpen];
+  const week = friend && friendWeek(friend);
+  // A friend whose class is gone has no week to show: back to the list,
+  // where their row asks for it again.
+  if (!week) state.friendOpen = -1;
+  $('friendsAll').hidden = !!week;
+  $('friendOne').hidden = !week;
+  $('friendBack').hidden = !week;
+  $('friendTitle').textContent = week ? friend.name : 'Φίλοι';
+  if (week) renderFriendWeek(status, week);
+  else renderFriends(status);
+}
+
+/** Every friend at one hour. With none yet, a line on what this is and the
+    button to add one. */
 function renderFriends(status) {
   const has = state.friends.length > 0;
-  $('tab-friends').hidden = !has;
-  $('tabs').classList.toggle('tabs--three', has);
+  $('friendsIntro').hidden = has;
+  $('friendsHead').hidden = !has;
+  $('friendsAdd').disabled = state.friends.length >= MAX_FRIENDS;
+  const list = $('friendsList');
+  list.innerHTML = '';
   if (!has) {
     state.friendsAt = null;
-    if (state.view === 'friends') setView('today');
+    $('friendsNow').hidden = true;
     return;
   }
   const at = friendsMoment(status);
@@ -1911,8 +1938,6 @@ function renderFriends(status) {
   $('friendsNow').hidden = !at.pinned;
   const mine = state.grid[at.d] ? state.grid[at.d][at.p] : null;
 
-  const list = $('friendsList');
-  list.innerHTML = '';
   state.friends.forEach((friend, i) => {
     const week = friendWeek(friend);
     const li = document.createElement('li');
@@ -1932,30 +1957,19 @@ function renderFriends(status) {
           : `<span class="friend__subject">${esc(h.subject)}</span>`)
         + (h.meta.length ? `<span class="friend__meta">${h.meta.map(esc).join(' · ')}</span>` : '')
         + (h.together ? '<span class="tag tag--next">Μαζί σου</span>' : '');
-      btn.addEventListener('click', () => openFriendSheet(i, at.d));
+      btn.addEventListener('click', () => {
+        state.friendOpen = i;
+        state.friendDay = at.d;
+        renderFriendSheet(clockStatus(state.schedule, now()));
+      });
     }
     li.appendChild(btn);
     list.appendChild(li);
   });
-  if ($('friendSheet').open) renderFriendSheet(status);
-}
-
-function openFriendSheet(i, day) {
-  state.friendOpen = i;
-  state.friendDay = day;
-  renderFriendSheet(clockStatus(state.schedule, now()));
-  $('friendSheet').showModal();
 }
 
 /** One friend's week, a day at a time: the same rows as the student's own. */
-function renderFriendSheet(status) {
-  const friend = state.friends[state.friendOpen];
-  const week = friend && friendWeek(friend);
-  if (!week) {
-    $('friendSheet').close();
-    return;
-  }
-  $('friendTitle').textContent = friend.name;
+function renderFriendWeek(status, week) {
   // Their own changes, if they made any, are on their phone and not here.
   $('friendClasses').textContent = `${selectedGroupIds(week.selection).join(' · ')}`
     + ' · όπως στο πρόγραμμα του σχολείου';
@@ -1980,59 +1994,16 @@ function renderFriendSheet(status) {
   renderDayList($('friendWeek'), state.friendDay, status, false, week);
 }
 
-/** «Φίλοι» in the ⚙ sheet: the way in for a student with none yet, and
-    where one is changed or taken off. */
-function friendsField() {
-  const wrap = document.createElement('div');
-  wrap.className = 'field';
-  wrap.innerHTML = '<p class="field__label">Φίλοι</p>'
-    + '<p class="field__note">Δες τι μάθημα και σε ποια αίθουσα έχουν οι φίλοι σου.'
-    + ' Διαλέγεις το τμήμα τους όπως το δικό σου· μένουν μόνο σε αυτό το κινητό.</p>';
-  if (state.friends.length) {
-    const list = document.createElement('ul');
-    list.className = 'changes';
-    state.friends.forEach((friend, i) => {
-      const li = document.createElement('li');
-      li.className = 'change';
-      const open = document.createElement('button');
-      open.type = 'button';
-      open.className = 'change__open';
-      const sel = pruneSelection(friend.selection, state.schedule);
-      open.innerHTML = `<strong>${esc(friend.name)}</strong><small>${esc(sel
-        ? selectedGroupIds(sel).join(' · ') : 'το τμήμα δεν υπάρχει στο νέο πρόγραμμα')}</small>`;
-      open.addEventListener('click', () => openFriendPicker(i));
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.className = 'change__del';
-      del.setAttribute('aria-label', `Αφαίρεσε: ${friend.name}`);
-      del.textContent = '✕';
-      del.addEventListener('click', () => {
-        state.friends.splice(i, 1);
-        storeFriends();
-        render();
-        renderPicker();
-      });
-      li.appendChild(open);
-      li.appendChild(del);
-      list.appendChild(li);
-    });
-    wrap.appendChild(list);
-  }
-  const actions = document.createElement('div');
-  actions.className = 'changes__actions';
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.className = 'ghost-btn';
-  add.textContent = '+ Πρόσθεσε φίλο/η';
-  add.disabled = state.friends.length >= MAX_FRIENDS;
-  add.addEventListener('click', () => openFriendPicker(-1));
-  actions.appendChild(add);
-  wrap.appendChild(actions);
-  return wrap;
+function removeFriend() {
+  if (!state.friends[state.friendOpen]) return;
+  state.friends.splice(state.friendOpen, 1);
+  storeFriends();
+  openFriends(-1);
 }
 
 /** The class picker, for a friend: `i` is which one, or -1 for a new one —
-    who most likely sits in the student's own year, so that is where it starts. */
+    who most likely sits in the student's own year, so that is where it starts.
+    Saving goes back to «Φίλοι»; ✕ leaves it closed. */
 function openFriendPicker(i) {
   if (!state.schedule) return;
   const friend = state.friends[i];
@@ -2055,13 +2026,14 @@ function commitFriend() {
   if (!draft.section || !name) return false;
   const friend = { name, selection: { grade: draft.grade, section: draft.section,
     track: draft.track, kontra: draft.kontra, extras: [...(draft.extras || [])] } };
-  if (state.friends[state.friendEditing]) state.friends[state.friendEditing] = friend;
+  const editing = state.friendEditing;
+  if (state.friends[editing]) state.friends[editing] = friend;
   else if (state.friends.length < MAX_FRIENDS) state.friends.push(friend);
   storeFriends();
   state.friendEditing = -1;
   $('picker').close();
-  render();
-  setView('friends');
+  // A friend just changed goes back to their week; a new one to the list.
+  openFriends(state.friends[editing] ? editing : -1);
   return true;
 }
 
@@ -2659,7 +2631,6 @@ function setView(view) {
   state.view = view;
   $('view-today').hidden = view !== 'today';
   $('view-week').hidden = view !== 'week';
-  $('view-friends').hidden = view !== 'friends';
   document.querySelectorAll('.tabs__btn').forEach((btn) => {
     const on = btn.dataset.view === view;
     btn.classList.toggle('is-active', on);
@@ -2678,12 +2649,15 @@ function wire() {
   $('themeClose').addEventListener('click', () => $('themeSheet').close());
   $('iosClose').addEventListener('click', () => $('iosSheet').close());
 
+  $('friendsBtn').addEventListener('click', () => openFriends(-1));
   $('friendsPrev').addEventListener('click', () => stepFriends(-1));
   $('friendsNext').addEventListener('click', () => stepFriends(1));
   $('friendsNow').addEventListener('click', () => { state.friendsAt = null; render(); });
   $('friendsAdd').addEventListener('click', () => openFriendPicker(-1));
+  $('friendBack').addEventListener('click', () => openFriends(-1));
   $('friendClose').addEventListener('click', () => $('friendSheet').close());
   $('friendEdit').addEventListener('click', () => openFriendPicker(state.friendOpen));
+  $('friendRemove').addEventListener('click', removeFriend);
 
   $('pickerSave').addEventListener('click', commitPicker);
   // Enter in a friend's name — the keyboard's «Go» — submits the form, and a

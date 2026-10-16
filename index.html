@@ -48,6 +48,10 @@
             aria-label="Εγκατάσταση εφαρμογής" title="Εγκατάσταση">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
     </button>
+    <button type="button" id="friendsBtn" class="icon-btn"
+            aria-label="Φίλοι" title="Φίλοι">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3.2 19.5c.5-3.3 2.9-5.3 5.8-5.3s5.3 2 5.8 5.3"/><path d="M15.4 5.1a3.2 3.2 0 0 1 0 6.1M17.6 14.6c1.8.7 3 2.4 3.3 4.9"/></svg>
+    </button>
     <button type="button" id="themeBtn" class="icon-btn"
             aria-label="Εμφάνιση" title="Εμφάνιση">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1 0 1.7-.8 1.7-1.7 0-.5-.2-.9-.5-1.2a1.7 1.7 0 0 1 1.3-2.9H17a4 4 0 0 0 4-4C21 6.8 17 3 12 3Z"/><circle cx="7.5" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="9.5" cy="7.6" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="7.3" r="1.1" fill="currentColor" stroke="none"/><circle cx="17.4" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg>
@@ -64,8 +68,6 @@
           id="tab-today" aria-selected="true" aria-controls="view-today">Σήμερα</button>
   <button type="button" class="tabs__btn" role="tab" data-view="week"
           id="tab-week" aria-selected="false" aria-controls="view-week">Εβδομάδα</button>
-  <button type="button" class="tabs__btn" role="tab" data-view="friends" hidden
-          id="tab-friends" aria-selected="false" aria-controls="view-friends">Φίλοι</button>
 </nav>
 <div id="editBar" class="editbar" hidden>
   <p>✎ Πάτα ένα μάθημα για να το αλλάξεις.</p>
@@ -94,23 +96,6 @@
     </div>
     <ol id="weekList" class="periods"></ol>
     <div id="weekGrid" class="gridwrap" hidden></div>
-  </section>
-
-  <section id="view-friends" class="view" role="tabpanel" aria-labelledby="tab-friends" hidden>
-    <div class="friends-head">
-      <button type="button" id="friendsPrev" class="icon-btn" aria-label="Προηγούμενη ώρα">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
-      </button>
-      <div class="friends-head__when" id="friendsWhen" aria-live="polite"></div>
-      <button type="button" id="friendsNext" class="icon-btn" aria-label="Επόμενη ώρα">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
-      </button>
-    </div>
-    <ul id="friendsList" class="friends"></ul>
-    <div class="friends-foot">
-      <button type="button" id="friendsNow" class="ghost-btn" hidden>Πίσω στην τωρινή ώρα</button>
-      <button type="button" id="friendsAdd" class="ghost-btn">+ Πρόσθεσε φίλο/η</button>
-    </div>
   </section>
 
 </main>
@@ -154,20 +139,46 @@
   </div>
 </dialog>
 
-<!-- A friend's week -->
+<!-- Friends: every one of them at one hour, or one friend's week -->
 <dialog id="friendSheet" class="sheet" aria-labelledby="friendTitle">
   <div class="sheet__inner">
     <div class="sheet__bar">
-      <h2 id="friendTitle"></h2>
+      <button type="button" id="friendBack" class="icon-btn" aria-label="Πίσω στους φίλους" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+      </button>
+      <h2 id="friendTitle">Φίλοι</h2>
       <button type="button" id="friendClose" class="icon-btn" aria-label="Κλείσιμο">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
     </div>
     <div class="sheet__body">
-      <p id="friendClasses" class="field__note"></p>
-      <div class="daystrip" id="friendDays" role="tablist" aria-label="Ημέρα"></div>
-      <ol id="friendWeek" class="periods"></ol>
-      <button type="button" id="friendEdit" class="ghost-btn friend-edit">Αλλαγή τμήματος</button>
+      <div id="friendsAll" class="friends-pane">
+        <p id="friendsIntro" class="field__note">Δες τι μάθημα και σε ποια αίθουσα έχουν οι φίλοι σου.
+          Διαλέγεις το τμήμα τους όπως το δικό σου· μένουν μόνο σε αυτό το κινητό.</p>
+        <div class="friends-head" id="friendsHead">
+          <button type="button" id="friendsPrev" class="icon-btn" aria-label="Προηγούμενη ώρα">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+          </button>
+          <div class="friends-head__when" id="friendsWhen" aria-live="polite"></div>
+          <button type="button" id="friendsNext" class="icon-btn" aria-label="Επόμενη ώρα">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+          </button>
+        </div>
+        <ul id="friendsList" class="friends"></ul>
+        <div class="friends-foot">
+          <button type="button" id="friendsNow" class="ghost-btn" hidden>Πίσω στην τωρινή ώρα</button>
+          <button type="button" id="friendsAdd" class="ghost-btn">+ Πρόσθεσε φίλο/η</button>
+        </div>
+      </div>
+      <div id="friendOne" class="friends-pane" hidden>
+        <p id="friendClasses" class="field__note"></p>
+        <div class="daystrip" id="friendDays" role="tablist" aria-label="Ημέρα"></div>
+        <ol id="friendWeek" class="periods"></ol>
+        <div class="friends-foot friends-foot--start">
+          <button type="button" id="friendEdit" class="ghost-btn">Αλλαγή τμήματος</button>
+          <button type="button" id="friendRemove" class="ghost-btn">Αφαίρεση</button>
+        </div>
+      </div>
     </div>
   </div>
 </dialog>
