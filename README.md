@@ -155,7 +155,7 @@ so without a bump the old files stay cached on every installed phone.
 
 No flags are normally needed: `--version` defaults to the creation date in the
 PDF footer, and `--valid-from` / `--valid-to` to the «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ
-19-10-26» banner aSc prints under every grid. Pass them only to override what the
+26-10-26» banner aSc prints under every grid. Pass them only to override what the
 PDF says. A revision with no end date in the banner simply has no `validTo`, and
 the app's footer reads «ισχύει από …» instead of a range.
 
@@ -227,10 +227,10 @@ Everything is standard library / plain browser APIs. No npm, no pip, no bundler.
 ```jsonc
 {
   "schemaVersion": 1,
-  "version": "2026-10-16",               // compared for update detection
-  "generatedAt": "2026-10-20T04:44:37+00:00",
-  "sourceDate": "2026-10-16",            // the date printed in the PDF footer
-  "validFrom": "2026-10-19", "validTo": null,   // read off the PDF's own banner
+  "version": "2026-10-23",               // compared for update detection
+  "generatedAt": "2026-10-26T07:30:43+00:00",
+  "sourceDate": "2026-10-23",            // the date printed in the PDF footer
+  "validFrom": "2026-10-26", "validTo": null,   // read off the PDF's own banner
   "days": ["Δευτέρα", "…"],
   "periods": [{ "n": 1, "start": "08:10", "end": "08:55" }],
   "rooms": { "ΕΠ": "Εργαστήριο Πληροφορικής" },
@@ -600,7 +600,7 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
 ## Notes and known limits
 
 - **The PDF says when it starts.** Every page carries a banner —
-  «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ 19-10-26», sometimes with an «εως …» end — and the
+  «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ 26-10-26», sometimes with an «εως …» end — and the
   converter reads `validFrom`/`validTo` from it instead of from a flag that is
   easy to forget or mistype. The report prints the banner it found.
 - **Class labels are folded to one spelling.** Whoever types the timetable into
