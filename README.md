@@ -162,7 +162,9 @@ the app's footer reads «ισχύει από …» instead of a range.
 Once a revision's `validTo` has gone by, the app keeps showing it, because there
 is nothing else to show. It does put «⚠ Το πρόγραμμα ίσχυε έως …· οι ώρες μπορεί
 να έχουν αλλάξει.» above both views, and the footer says «ίσχυε». A one-week
-timetable is the one most likely to be wrong the week after.
+timetable is the one most likely to be wrong the week after. The student can
+close the notice with ✕. It then stays closed for that timetable, and the
+footer still says «ίσχυε». The next timetable that runs out shows it again.
 
 ### Publishing updates without redeploying
 

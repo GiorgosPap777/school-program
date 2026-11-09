@@ -1284,13 +1284,33 @@ await test('a timetable past its own end date says so above both views', async (
   assert.equal(expired({ ...week, validTo: null }, new Date('2030-01-01T10:00')), false,
     'a timetable with no end date expired');
 
+  const text = document.getElementById('staleText');
   state.schedule = week;
   app('renderStaleNote')(new Date('2026-11-17T08:20'));
   assert.equal(note.hidden, false, 'no notice after the end date');
-  assert.match(note.textContent, /ίσχυε έως/);
+  assert.match(text.textContent, /ίσχυε έως/);
   app('renderStaleNote')(new Date('2026-11-11T08:20'));
   assert.equal(note.hidden, true, 'a notice while the timetable is current');
-  assert.equal(note.textContent, '');
+  assert.equal(text.textContent, '');
+});
+
+await test('a closed «ίσχυε έως» notice stays closed for that timetable only', async () => {
+  const note = document.getElementById('staleNote');
+  const week = { ...SCHEDULE, version: '2026-11-05', validFrom: '2026-11-09', validTo: '2026-11-13' };
+  const after = new Date('2026-11-17T08:20');
+  state.schedule = week;
+  app('wire')();
+  app('renderStaleNote')(after);
+  assert.equal(note.hidden, false, 'no notice to close');
+  document.getElementById('staleDismiss').on.click();
+  assert.equal(note.hidden, true, 'closing it did not hide it');
+  app('renderStaleNote')(new Date('2026-11-18T10:00'));
+  assert.equal(note.hidden, true, 'it came back the next day');
+  // The next one-week timetable to run out says so again.
+  state.schedule = { ...week, version: '2026-11-12', validFrom: '2026-11-16', validTo: '2026-11-20' };
+  app('renderStaleNote')(new Date('2026-11-23T08:20'));
+  assert.equal(note.hidden, false, 'closing one hid it for the next timetable too');
+  localStorage.removeItem('gel7.staleseen.v1');
 });
 
 /* ------------------------------------------------------------------- report */

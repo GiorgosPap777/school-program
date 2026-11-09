@@ -450,16 +450,19 @@ table.grid td.is-changed .grid__subject::after { content: " ✎"; color: var(--a
 }
 .banner--warn { background: var(--warn-bg); color: var(--warn); }
 
-/* A timetable whose own end date has passed: above both views, and not
-   dismissable, since it stays true until a newer timetable arrives. */
+/* A timetable whose own end date has passed: above both views, until the
+   student closes it or a newer timetable arrives. */
 .stale {
+  display: flex; align-items: center; gap: 10px;
   margin-bottom: var(--gap);
-  padding: 10px 14px;
+  padding: 8px 6px 8px 14px;
   border-radius: var(--radius);
   background: var(--warn-bg);
   color: var(--warn);
   font-size: .86rem;
 }
+.stale p { flex: 1; min-width: 0; }
+.stale .banner__dismiss { color: inherit; }
 
 /* -------------------------------------------------------------- edit mode */
 
