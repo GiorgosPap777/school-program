@@ -896,6 +896,46 @@ def build(pdf_path: str, args) -> tuple:
     return schedule, report
 
 
+def banner_day(iso: str) -> str:
+    """«2026-10-19» -> «19-10-26», the way the PDF's banner writes it."""
+    y, m, d = iso.split("-")
+    return "%d-%d-%s" % (int(d), int(m), y[2:])
+
+
+def check_dates(schedule: dict, previous_path, report) -> None:
+    """Catch a banner that does not say when this timetable really starts.
+
+    aSc keeps the «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ …» text from the file it was saved
+    from, and the school does not always update it: one upload created on
+    23-10-26 still read «ΑΠΟ 19-10-26». Every real revision so far was created
+    before the Monday it starts, so a start earlier than the creation date is a
+    stale banner, and a start earlier than the timetable being replaced means
+    this PDF is the older one, or carries a stale banner too. Either goes into
+    the warnings, so report.ok() fails and nothing is published unread.
+    """
+    start, made = schedule.get("validFrom"), schedule.get("sourceDate")
+    if start and made and start < made:
+        report.warnings.append(
+            "το banner λέει «ΑΠΟ %s», πριν από τη δημιουργία του PDF (%s) — "
+            "μάλλον ξεχασμένο banner· βρες την πραγματική ημερομηνία έναρξης "
+            "και δώσ' τη με --valid-from" % (banner_day(start), banner_day(made)))
+
+    if not previous_path or not os.path.exists(previous_path):
+        return
+    try:
+        with open(previous_path, encoding="utf-8") as fh:
+            previous = json.load(fh)
+    except (OSError, ValueError):
+        return
+    was = previous.get("validFrom")
+    if start and was and start < was:
+        report.warnings.append(
+            "ισχύει από %s, πριν από το πρόγραμμα που αντικαθιστά (από %s, %s) — "
+            "είτε είναι παλαιότερο PDF είτε το banner του είναι ξεχασμένο· "
+            "για σκόπιμη επιστροφή σε παλιό πρόγραμμα δώσε --previous none"
+            % (banner_day(start), banner_day(was), previous.get("sourceFile", previous_path)))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -907,6 +947,10 @@ def main(argv=None):
     ap.add_argument("--school", default="7ο ΓΕΝΙΚΟ ΛΥΚΕΙΟ ΗΡΑΚΛΕΙΟΥ ΚΡΗΤΗΣ")
     ap.add_argument("--report", help="where to write the report "
                                      "(default: alongside the output)")
+    ap.add_argument("--previous", help="the schedule.json this one replaces, to "
+                                       "check it does not start earlier (default: "
+                                       "the output file if it exists, else "
+                                       "data/schedule.json; «none» to skip)")
     args = ap.parse_args(argv)
 
     try:
@@ -914,6 +958,17 @@ def main(argv=None):
     except ConversionError as exc:
         print("σφάλμα: %s" % exc, file=sys.stderr)
         return 2
+
+    # Read before the output is overwritten: by default that is the very file
+    # being replaced. Converting to a scratch file still compares against the
+    # app's own data/schedule.json.
+    previous = args.previous
+    if previous is None:
+        previous = args.output if os.path.exists(args.output) else \
+            os.path.join(HERE, "..", "data", "schedule.json")
+    elif previous.lower() == "none":
+        previous = None
+    check_dates(schedule, previous, report)
 
     out_dir = os.path.dirname(os.path.abspath(args.output))
     os.makedirs(out_dir, exist_ok=True)

@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.14.5';
+const APP_VERSION = '1.15.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -837,6 +837,7 @@ function render() {
   if (!state.weekDayPinned) state.weekDay = listedDay;
 
   renderBar();
+  renderStaleNote(date);
   $('tab-today').textContent = todayTabLabel(status, rolled, listedDay);
   renderStatusCard(date, status, rolled, listedDay);
   renderDayList($('todayList'), listedDay, status, rolled);
@@ -1158,11 +1159,37 @@ function renderWeekGrid(status) {
   wrap.innerHTML = html + '</tbody></table>';
 }
 
+/** «2026-11-17» for the local day of `date`, to compare as text with the
+    schedule's validFrom / validTo. */
+function isoDay(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** True once the day the timetable's own banner says it ends has gone by —
+    a one-week revision the school has not followed with a new one yet, or one
+    the app has not picked up. A timetable with no end date never expires. */
+function scheduleExpired(schedule, date) {
+  return Boolean(schedule.validTo) && isoDay(date) > schedule.validTo;
+}
+
+/** Said above both views, not only in the footer: after a one-week timetable
+    ends, its hours (a teacher away that week, a class sent home early) are
+    the likeliest of all to be wrong, and they look exactly like right ones. */
+function renderStaleNote(date) {
+  const note = $('staleNote');
+  const stale = scheduleExpired(state.schedule, date);
+  note.hidden = !stale;
+  note.textContent = stale
+    ? `⚠ Το πρόγραμμα ίσχυε έως ${formatDay(state.schedule.validTo)}· οι ώρες μπορεί να έχουν αλλάξει.`
+    : '';
+}
+
 function renderFooter() {
   const s = state.schedule;
   // A revision that runs until further notice has a start but no end date.
   const range = !s.validFrom ? ''
-    : s.validTo ? ` · ισχύει ${formatDay(s.validFrom)}–${formatDay(s.validTo)}`
+    : s.validTo ? ` · ${scheduleExpired(s, now()) ? 'ίσχυε' : 'ισχύει'} ${formatDay(s.validFrom)}–${formatDay(s.validTo)}`
     : ` · ισχύει από ${formatDay(s.validFrom)}`;
   $('footMeta').innerHTML =
     `${esc(s.school || '')}<br>Πρόγραμμα έκδοσης <strong>${esc(s.version)}</strong>${esc(range)}`

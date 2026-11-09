@@ -1274,6 +1274,25 @@ await test('a tap beside a sheet closes it; one that starts or ends on it does n
   }
 });
 
+await test('a timetable past its own end date says so above both views', async () => {
+  const note = document.getElementById('staleNote');
+  const expired = app('scheduleExpired');
+  const week = { ...SCHEDULE, validFrom: '2026-11-09', validTo: '2026-11-13' };
+  // Local days, so a student on Friday evening still has a current timetable.
+  assert.equal(expired(week, new Date('2026-11-13T23:59')), false, 'expired on its last day');
+  assert.equal(expired(week, new Date('2026-11-14T00:00')), true, 'not expired the day after');
+  assert.equal(expired({ ...week, validTo: null }, new Date('2030-01-01T10:00')), false,
+    'a timetable with no end date expired');
+
+  state.schedule = week;
+  app('renderStaleNote')(new Date('2026-11-17T08:20'));
+  assert.equal(note.hidden, false, 'no notice after the end date');
+  assert.match(note.textContent, /ίσχυε έως/);
+  app('renderStaleNote')(new Date('2026-11-11T08:20'));
+  assert.equal(note.hidden, true, 'a notice while the timetable is current');
+  assert.equal(note.textContent, '');
+});
+
 /* ------------------------------------------------------------------- report */
 
 let failed = 0;

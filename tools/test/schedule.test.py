@@ -313,6 +313,51 @@ def main(path):
                 assert len(track["lessons"]) >= 3, \
                     "track %s only has %d lessons" % (track["label"], len(track["lessons"]))
 
+    @check("the timetable starts no earlier than the PDF was made, and ends after it starts")
+    def _():
+        # A start before the creation date is a banner aSc kept from an older
+        # file (see check_dates() in the converter), not a real start date.
+        start, made, end = data.get("validFrom"), data.get("sourceDate"), data.get("validTo")
+        if start and made:
+            assert start >= made, "validFrom %s is before sourceDate %s" % (start, made)
+        if start and end:
+            assert end >= start, "validTo %s is before validFrom %s" % (end, start)
+
+    @check("the converter flags a stale banner and a timetable older than the one it replaces")
+    def _():
+        import importlib.util
+        import tempfile
+        spec = importlib.util.spec_from_file_location(
+            "pdf2schedule", os.path.join(ROOT, "tools", "pdf2schedule.py"))
+        conv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(conv)
+
+        def warnings(new, previous=None):
+            report = conv.Report()
+            path = None
+            if previous is not None:
+                fd, path = tempfile.mkstemp(suffix=".json")
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(previous, fh)
+            try:
+                conv.check_dates(new, path, report)
+            finally:
+                if path:
+                    os.remove(path)
+            return report.warnings
+
+        nov = {"validFrom": "2026-11-09", "sourceDate": "2026-11-05", "sourceFile": "nov.pdf"}
+        # The «2-11-26» upload: made 23-10, banner still «ΑΠΟ 19-10-26».
+        stale = {"validFrom": "2026-10-19", "sourceDate": "2026-10-23"}
+        assert warnings(nov) == [], "a normal revision was flagged"
+        assert warnings(nov, nov) == [], "re-importing the same revision was flagged"
+        assert warnings({"validFrom": "2026-11-16", "sourceDate": "2026-11-12"}, nov) == [], \
+            "a newer revision was flagged"
+        assert len(warnings(stale)) == 1, "a banner older than the PDF went unflagged"
+        assert len(warnings(stale, nov)) == 2, "an older timetable went unflagged"
+        assert warnings({"validFrom": "2026-11-09"}, {"version": "x"}) == [], \
+            "missing dates were treated as a problem"
+
     failed = 0
     for ok, name in results:
         if not ok:

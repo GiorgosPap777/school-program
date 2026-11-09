@@ -159,6 +159,11 @@ PDF footer, and `--valid-from` / `--valid-to` to the «ΩΡΟΛΟΓΙΟ ΠΡΟΓ
 PDF says. A revision with no end date in the banner simply has no `validTo`, and
 the app's footer reads «ισχύει από …» instead of a range.
 
+Once a revision's `validTo` has gone by, the app keeps showing it, because there
+is nothing else to show. It does put «⚠ Το πρόγραμμα ίσχυε έως …· οι ώρες μπορεί
+να έχουν αλλάξει.» above both views, and the footer says «ίσχυε». A one-week
+timetable is the one most likely to be wrong the week after.
+
 ### Publishing updates without redeploying
 
 Set one constant at the top of `app.js`:
@@ -603,6 +608,14 @@ http://localhost:8080/?now=2026-09-19T12:00    # Saturday
   «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ 9-11-26», sometimes with an «εως …» end — and the
   converter reads `validFrom`/`validTo` from it instead of from a flag that is
   easy to forget or mistype. The report prints the banner it found.
+- **…but the banner can be stale.** aSc keeps the banner text from the file it
+  was saved from. One upload created on 23-10-26 still read «ΑΠΟ 19-10-26». So
+  the converter adds a warning if the start date is earlier than the PDF's own
+  creation date, or earlier than the `validFrom` of the timetable it replaces.
+  That is the output file if it exists, otherwise `data/schedule.json`;
+  `--previous <file>` picks another, and `--previous none` skips the check for
+  a deliberate rollback. For a stale banner, find the real start date and pass
+  it with `--valid-from`.
 - **Class labels are folded to one spelling.** Whoever types the timetable into
   aSc is not consistent about spaces and it changes between exports: the same
   κόντρα group was «Γιστορια 3» in one revision and «Γ ιστορια 3» in the next,
