@@ -160,11 +160,13 @@ PDF says. A revision with no end date in the banner simply has no `validTo`, and
 the app's footer reads «ισχύει από …» instead of a range.
 
 Once a revision's `validTo` has gone by, the app keeps showing it, because there
-is nothing else to show. It does put «⚠ Το πρόγραμμα ίσχυε έως …· οι ώρες μπορεί
-να έχουν αλλάξει.» above both views, and the footer says «ίσχυε». A one-week
-timetable is the one most likely to be wrong the week after. The student can
-close the notice with ✕. It then stays closed for that timetable, and the
-footer still says «ίσχυε». The next timetable that runs out shows it again.
+is nothing else to show. A one-week timetable is the one most likely to be wrong
+the week after, so the app says so in a red popup: «Το πρόγραμμα έχει λήξει».
+The popup has no ✕ and a tap beside it does nothing. Only «Κατάλαβα» counts, and
+it takes a tap only after two seconds, so it is read rather than tapped away.
+Esc or the back gesture close it without counting as read, and it comes back.
+Once acknowledged, it stays away for that timetable; the footer still says
+«ίσχυε». The next timetable that runs out pops it up again.
 
 ### Publishing updates without redeploying
 

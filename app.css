@@ -450,19 +450,35 @@ table.grid td.is-changed .grid__subject::after { content: " ✎"; color: var(--a
 }
 .banner--warn { background: var(--warn-bg); color: var(--warn); }
 
-/* A timetable whose own end date has passed: above both views, until the
-   student closes it or a newer timetable arrives. */
-.stale {
-  display: flex; align-items: center; gap: 10px;
-  margin-bottom: var(--gap);
-  padding: 8px 6px 8px 14px;
+/* A timetable whose own end date has passed: a red popup in the middle of
+   the screen, with one deliberate button and no ✕, so it is read and not
+   swatted away. */
+.alert {
+  width: calc(100% - 2 * var(--pad));
+  max-width: 360px;
+  margin: auto;
+  padding: 22px 20px 18px;
+  border: 2px solid var(--warn);
   border-radius: var(--radius);
   background: var(--warn-bg);
-  color: var(--warn);
-  font-size: .86rem;
+  color: var(--text);
+  text-align: center;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .35);
 }
-.stale p { flex: 1; min-width: 0; }
-.stale .banner__dismiss { color: inherit; }
+.alert::backdrop { background: rgba(6, 10, 20, .6); }
+.alert__icon { font-size: 2.2rem; line-height: 1; color: var(--warn); }
+.alert h2 { margin-top: 8px; font-size: 1.15rem; font-weight: 700; color: var(--warn); }
+.alert p:not(.alert__icon) { margin-top: 8px; font-size: .95rem; line-height: 1.45; }
+.alert__btn {
+  width: 100%;
+  margin-top: 18px;
+  padding: 13px 18px;
+  border: 0; border-radius: 12px;
+  background: var(--warn); color: var(--warn-bg);
+  font: inherit; font-size: 1rem; font-weight: 700;
+  cursor: pointer;
+}
+.alert__btn:disabled { opacity: .45; cursor: wait; }
 
 /* -------------------------------------------------------------- edit mode */
 

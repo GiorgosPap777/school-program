@@ -84,10 +84,6 @@
 
   <div id="editRecall" class="recall" hidden></div>
 
-  <div id="staleNote" class="stale" role="status" hidden>
-    <p id="staleText"></p>
-    <button type="button" id="staleDismiss" class="banner__dismiss" aria-label="Απόρριψη">✕</button>
-  </div>
 
   <section id="view-today" class="view" role="tabpanel" aria-labelledby="tab-today">
     <div id="statusCard" class="status"></div>
@@ -111,6 +107,13 @@
 </footer>
 
 <!-- Τμήμα picker -->
+<dialog id="staleAlert" class="alert" role="alertdialog" aria-labelledby="staleTitle" aria-describedby="staleText">
+  <p class="alert__icon" aria-hidden="true">⚠</p>
+  <h2 id="staleTitle">Το πρόγραμμα έχει λήξει</h2>
+  <p id="staleText"></p>
+  <button type="button" id="staleOk" class="alert__btn">Κατάλαβα</button>
+</dialog>
+
 <dialog id="picker" class="sheet" aria-labelledby="pickerTitle">
   <form method="dialog" class="sheet__inner" id="pickerForm">
     <div class="sheet__bar">

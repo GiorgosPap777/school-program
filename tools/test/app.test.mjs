@@ -1274,43 +1274,54 @@ await test('a tap beside a sheet closes it; one that starts or ends on it does n
   }
 });
 
-await test('a timetable past its own end date says so above both views', async () => {
-  const note = document.getElementById('staleNote');
+await test('a timetable past its own end date pops up a warning, never on its last day', async () => {
   const expired = app('scheduleExpired');
-  const week = { ...SCHEDULE, validFrom: '2026-11-09', validTo: '2026-11-13' };
+  const week = { ...SCHEDULE, version: '2026-11-05', validFrom: '2026-11-09', validTo: '2026-11-13' };
   // Local days, so a student on Friday evening still has a current timetable.
   assert.equal(expired(week, new Date('2026-11-13T23:59')), false, 'expired on its last day');
   assert.equal(expired(week, new Date('2026-11-14T00:00')), true, 'not expired the day after');
   assert.equal(expired({ ...week, validTo: null }, new Date('2030-01-01T10:00')), false,
     'a timetable with no end date expired');
 
-  const text = document.getElementById('staleText');
+  const alert = document.getElementById('staleAlert');
+  let shown = 0;
+  alert.showModal = () => { shown++; alert.open = true; };
+  alert.close = () => { alert.open = false; };
   state.schedule = week;
-  app('renderStaleNote')(new Date('2026-11-17T08:20'));
-  assert.equal(note.hidden, false, 'no notice after the end date');
-  assert.match(text.textContent, /ίσχυε έως/);
-  app('renderStaleNote')(new Date('2026-11-11T08:20'));
-  assert.equal(note.hidden, true, 'a notice while the timetable is current');
-  assert.equal(text.textContent, '');
+  app('renderStaleAlert')(new Date('2026-11-11T08:20'));
+  assert.equal(shown, 0, 'a popup while the timetable is current');
+  app('renderStaleAlert')(new Date('2026-11-17T08:20'));
+  assert.equal(shown, 1, 'no popup after the end date');
+  assert.match(document.getElementById('staleText').textContent, /ίσχυε μόνο έως/);
+  assert.equal(document.getElementById('staleOk').disabled, true, 'the button took a tap at once');
+  app('renderStaleAlert')(new Date('2026-11-17T08:21'));
+  assert.equal(shown, 1, 'shown twice over itself');
+  alert.open = false;
 });
 
-await test('a closed «ίσχυε έως» notice stays closed for that timetable only', async () => {
-  const note = document.getElementById('staleNote');
+await test('only «Κατάλαβα» puts the popup away, for that timetable only', async () => {
+  const alert = document.getElementById('staleAlert');
+  let shown = 0;
+  alert.showModal = () => { shown++; alert.open = true; };
+  alert.close = () => { alert.open = false; };
   const week = { ...SCHEDULE, version: '2026-11-05', validFrom: '2026-11-09', validTo: '2026-11-13' };
-  const after = new Date('2026-11-17T08:20');
   state.schedule = week;
   app('wire')();
-  app('renderStaleNote')(after);
-  assert.equal(note.hidden, false, 'no notice to close');
-  document.getElementById('staleDismiss').on.click();
-  assert.equal(note.hidden, true, 'closing it did not hide it');
-  app('renderStaleNote')(new Date('2026-11-18T10:00'));
-  assert.equal(note.hidden, true, 'it came back the next day');
-  // The next one-week timetable to run out says so again.
+  app('renderStaleAlert')(new Date('2026-11-17T08:20'));
+  // Esc / the back gesture: closed, but not read — it comes back.
+  alert.close();
+  app('renderStaleAlert')(new Date('2026-11-17T08:21'));
+  assert.equal(shown, 2, 'closing it some other way counted as read');
+  document.getElementById('staleOk').on.click();
+  assert.equal(alert.open, false, '«Κατάλαβα» did not close it');
+  app('renderStaleAlert')(new Date('2026-11-18T10:00'));
+  assert.equal(shown, 2, 'it came back after «Κατάλαβα»');
+  // The next one-week timetable to run out pops up again.
   state.schedule = { ...week, version: '2026-11-12', validFrom: '2026-11-16', validTo: '2026-11-20' };
-  app('renderStaleNote')(new Date('2026-11-23T08:20'));
-  assert.equal(note.hidden, false, 'closing one hid it for the next timetable too');
-  localStorage.removeItem('gel7.staleseen.v1');
+  app('renderStaleAlert')(new Date('2026-11-23T08:20'));
+  assert.equal(shown, 3, 'acknowledging one hid it for the next timetable too');
+  alert.open = false;
+  localStorage.removeItem('gel7.staleack.v1');
 });
 
 /* ------------------------------------------------------------------- report */

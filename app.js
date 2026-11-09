@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.15.1';
+const APP_VERSION = '1.16.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -20,8 +20,11 @@ const SCHEMA_VERSION = 1;
 const KEY_SELECTION = 'gel7.selection.v1';
 const KEY_SCHEDULE = 'gel7.schedule.v1';
 const KEY_DISMISSED = 'gel7.dismissed.v1';
-// Which ended timetable the student closed the «ίσχυε έως» notice for.
-const KEY_STALE_SEEN = 'gel7.staleseen.v1';
+// Which ended timetable the student has acknowledged the «έχει λήξει» popup for.
+const KEY_STALE_ACK = 'gel7.staleack.v1';
+/* The popup's button waits this long before it takes a tap, so a student
+   reads at least its title instead of tapping it away on reflex. */
+const STALE_ACK_DELAY_MS = 2000;
 const KEY_LAST_CHECK = 'gel7.lastcheck.v1';
 const KEY_PENDING = 'gel7.pending.v1';
 const KEY_CHANGES = 'gel7.changes.v1';
@@ -839,7 +842,7 @@ function render() {
   if (!state.weekDayPinned) state.weekDay = listedDay;
 
   renderBar();
-  renderStaleNote(date);
+  renderStaleAlert(date);
   $('tab-today').textContent = todayTabLabel(status, rolled, listedDay);
   renderStatusCard(date, status, rolled, listedDay);
   renderDayList($('todayList'), listedDay, status, rolled);
@@ -1175,23 +1178,40 @@ function scheduleExpired(schedule, date) {
   return Boolean(schedule.validTo) && isoDay(date) > schedule.validTo;
 }
 
-/** Which ended timetable a closed notice was for: closing it once is for this
-    timetable only, so the next one that runs out says so again. */
+/** Which ended timetable an acknowledgement was for: it covers this
+    timetable only, so the next one that runs out pops up again. */
 function staleKey(schedule) {
   return `${schedule.version || ''}|${schedule.validTo || ''}`;
 }
 
-/** Said above both views, not only in the footer: after a one-week timetable
-    ends, its hours (a teacher away that week, a class sent home early) are
-    the likeliest of all to be wrong, and they look exactly like right ones.
-    Once read, the student can close it: the footer still says «ίσχυε». */
-function renderStaleNote(date) {
-  const stale = scheduleExpired(state.schedule, date)
-    && load(KEY_STALE_SEEN, null) !== staleKey(state.schedule);
-  $('staleNote').hidden = !stale;
-  $('staleText').textContent = stale
-    ? `⚠ Το πρόγραμμα ίσχυε έως ${formatDay(state.schedule.validTo)}· οι ώρες μπορεί να έχουν αλλάξει.`
-    : '';
+/** After a one-week timetable ends, its hours (a teacher away that week, a
+    class sent home early) are the likeliest of all to be wrong, and they look
+    exactly like right ones. So it is said in a red popup, not a line a
+    student scrolls past or closes on reflex: only «Κατάλαβα» closes it, and
+    not for the first couple of seconds. Esc or the back gesture do close it,
+    but without counting as read — the next render puts it back. */
+function renderStaleAlert(date) {
+  const alert = $('staleAlert');
+  const due = scheduleExpired(state.schedule, date)
+    && load(KEY_STALE_ACK, null) !== staleKey(state.schedule);
+  if (!due) {
+    if (alert.open) alert.close();
+    return;
+  }
+  // Never on top of a sheet the student is busy in; it waits for the next render.
+  if (alert.open || document.querySelector('dialog[open]')) return;
+  $('staleText').textContent = `Αυτό το πρόγραμμα ίσχυε μόνο έως ${formatDay(state.schedule.validTo)}.`
+    + ' Οι ώρες που βλέπεις μπορεί να έχουν αλλάξει — έλεγξε με το σχολείο.'
+    + ' Μόλις βγει το νέο πρόγραμμα, θα σου το πούμε.';
+  const ok = $('staleOk');
+  ok.disabled = true;
+  setTimeout(() => { ok.disabled = false; }, STALE_ACK_DELAY_MS);
+  alert.showModal();
+}
+
+function acknowledgeStale() {
+  save(KEY_STALE_ACK, staleKey(state.schedule));
+  $('staleAlert').close();
 }
 
 function renderFooter() {
@@ -2757,10 +2777,7 @@ function wire() {
 
   $('checkBtn').addEventListener('click', () => checkForUpdate({ silent: false }));
   $('retryBtn').addEventListener('click', start);
-  $('staleDismiss').addEventListener('click', () => {
-    save(KEY_STALE_SEEN, staleKey(state.schedule));
-    $('staleNote').hidden = true;
-  });
+  $('staleOk').addEventListener('click', acknowledgeStale);
   // Back online: a first load gets its retry, and a «Έλεγχος» tapped with no
   // signal its answer. Otherwise it is a background check like any other.
   window.addEventListener('online', () => checkForUpdate({ silent: true }));
