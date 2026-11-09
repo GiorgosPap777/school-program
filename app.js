@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.16.0';
+const APP_VERSION = '1.16.1';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -1203,10 +1203,37 @@ function renderStaleAlert(date) {
   $('staleText').textContent = `Αυτό το πρόγραμμα ίσχυε μόνο έως ${formatDay(state.schedule.validTo)}.`
     + ' Οι ώρες που βλέπεις μπορεί να έχουν αλλάξει — έλεγξε με το σχολείο.'
     + ' Μόλις βγει το νέο πρόγραμμα, θα σου το πούμε.';
-  const ok = $('staleOk');
-  ok.disabled = true;
-  setTimeout(() => { ok.disabled = false; }, STALE_ACK_DELAY_MS);
+  startStaleCountdown($('staleOk'));
   alert.showModal();
+}
+
+let staleTimer = null;
+
+/** The wait on «Κατάλαβα» has to look like a wait. A button that just ignores
+    taps reads as a frozen app, so it counts down in its own label — «Κατάλαβα
+    σε 2…», «σε 1…» — while a line fills along its bottom edge, and only then
+    turns solid red and takes the tap. */
+function startStaleCountdown(ok) {
+  let left = Math.ceil(STALE_ACK_DELAY_MS / 1000);
+  clearTimeout(staleTimer);
+  ok.disabled = true;
+  ok.style.animationDuration = `${STALE_ACK_DELAY_MS}ms`;
+  // Restart the fill from empty, even if it was mid-way through before.
+  ok.classList.remove('is-waiting');
+  void ok.offsetWidth;
+  ok.classList.add('is-waiting');
+  const step = () => {
+    if (left > 0) {
+      ok.textContent = `Κατάλαβα σε ${left}…`;
+      left -= 1;
+      staleTimer = setTimeout(step, 1000);
+      return;
+    }
+    ok.disabled = false;
+    ok.classList.remove('is-waiting');
+    ok.textContent = 'Κατάλαβα';
+  };
+  step();
 }
 
 function acknowledgeStale() {

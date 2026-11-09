@@ -478,7 +478,23 @@ table.grid td.is-changed .grid__subject::after { content: " ✎"; color: var(--a
   font: inherit; font-size: 1rem; font-weight: 700;
   cursor: pointer;
 }
-.alert__btn:disabled { opacity: .45; cursor: wait; }
+/* Counting down: outlined, not greyed out (greyed reads as broken), with a
+   line that fills along the bottom edge over the wait. */
+.alert__btn.is-waiting {
+  /* One layer only: a second one makes the size list jump instead of fill. */
+  background: linear-gradient(var(--warn), var(--warn)) left bottom / 0% 4px no-repeat;
+  background-color: transparent;
+  color: var(--warn);
+  box-shadow: inset 0 0 0 2px var(--warn);
+  cursor: wait;
+  animation-name: alert-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+@keyframes alert-fill { to { background-size: 100% 4px; } }
+@media (prefers-reduced-motion: reduce) {
+  .alert__btn.is-waiting { animation: none; }
+}
 
 /* -------------------------------------------------------------- edit mode */
 

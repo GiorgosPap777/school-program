@@ -164,6 +164,8 @@ is nothing else to show. A one-week timetable is the one most likely to be wrong
 the week after, so the app says so in a red popup: «Το πρόγραμμα έχει λήξει».
 The popup has no ✕ and a tap beside it does nothing. Only «Κατάλαβα» counts, and
 it takes a tap only after two seconds, so it is read rather than tapped away.
+The button counts the wait down in its label («Κατάλαβα σε 2…») while a line
+fills along its bottom edge, so the pause looks deliberate, not broken.
 Esc or the back gesture close it without counting as read, and it comes back.
 Once acknowledged, it stays away for that timetable; the footer still says
 «ίσχυε». The next timetable that runs out pops it up again.

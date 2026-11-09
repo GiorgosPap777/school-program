@@ -1293,7 +1293,13 @@ await test('a timetable past its own end date pops up a warning, never on its la
   app('renderStaleAlert')(new Date('2026-11-17T08:20'));
   assert.equal(shown, 1, 'no popup after the end date');
   assert.match(document.getElementById('staleText').textContent, /ίσχυε μόνο έως/);
-  assert.equal(document.getElementById('staleOk').disabled, true, 'the button took a tap at once');
+  const ok = document.getElementById('staleOk');
+  assert.equal(ok.disabled, true, 'the button took a tap at once');
+  // A wait that shows itself, so the button does not look frozen.
+  assert.match(ok.textContent, /^Κατάλαβα σε 2…$/, 'the button does not count down');
+  await new Promise((r) => setTimeout(r, 2100));
+  assert.equal(ok.disabled, false, 'the button never woke up');
+  assert.equal(ok.textContent, 'Κατάλαβα');
   app('renderStaleAlert')(new Date('2026-11-17T08:21'));
   assert.equal(shown, 1, 'shown twice over itself');
   alert.open = false;
