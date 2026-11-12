@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.16.1';
+const APP_VERSION = '1.16.2';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -1479,7 +1479,7 @@ function renderClassPicker() {
     }
     body.appendChild(field('Ομάδα προσανατολισμού', friend
       ? 'Προαιρετικό — χωρίς αυτήν, οι ώρες της φαίνονται ως «Ώρα κατεύθυνσης».'
-      : 'Διάλεξε την ομάδα που γράφει το πρόγραμμα της σχολής σου.', chips));
+      : 'Διάλεξε την ομάδα που γράφει το πρόγραμμα του σχολείου σου.', chips));
   }
 
   if (model.kontra.size) {
