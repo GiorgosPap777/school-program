@@ -40,20 +40,26 @@ script and the hash in `docker/default.conf` has to change with it;
 file is a 404 rather than `index.html`, so a misnamed `schedule.json` fails as
 missing instead of as «not valid JSON».
 
-The schedule is baked in at build time. To publish a new one without rebuilding,
-mount over it:
+The image carries the schedule it was built with. To publish new ones without
+rebuilding, mount a folder over `data/` — the folder, not the file:
 
 ```bash
 docker run -d -p 127.0.0.1:8080:80 \
-  -v "$PWD/data/schedule.json:/usr/share/nginx/html/data/schedule.json:ro" \
+  -v "$PWD/data:/usr/share/nginx/html/data:ro" \
   giorgospap777/school-program
 ```
+
+A new timetable is then a file copy: put it next to the old one and rename it
+over it (`scp schedule.json host:…/data/schedule.json.tmp && ssh host mv …tmp
+…/data/schedule.json`), so a phone asking mid-copy never gets half a file.
+nginx reads it from disk on every request, so there is nothing to restart. A
+single-file mount would pin the old file, and the rename would never show up.
 
 The published image is multi-arch (`linux/amd64` + `linux/arm64`), so it runs on
 a normal server or on a Raspberry Pi / ARM VPS without changes. The repository is
 private, so the host needs `docker login` before it can pull.
 
-Rebuild after a schedule import with:
+Rebuild after a change to the app itself with:
 
 ```bash
 docker build -t giorgospap777/school-program .
@@ -121,11 +127,12 @@ school.gr {
 **When you change `index.html`, `app.css`, `app.js` or `sw.js`, bump
 `APP_VERSION` in _both_ `app.js` and `sw.js`.** The shell cache is keyed on it,
 so without a bump the old files stay cached on every installed phone.
-`node tools/test/sw.test.mjs` fails if the two drift apart.
+`node tools/test/sw.test.mjs` fails if the two drift apart. A new timetable on
+its own needs no bump: `data/schedule.json` is fetched network-first.
 
 ---
 
-## Updating the schedule (4–5× per year)
+## Updating the schedule (most weeks)
 
 1. Drop the new PDF into the project folder.
 2. Regenerate the data:
@@ -149,9 +156,10 @@ so without a bump the old files stay cached on every installed phone.
    node tools/test/app.test.mjs
    ```
 
-5. Publish. Either redeploy the folder, or — if you set `REMOTE_SCHEDULE_URL`
-   (see below) — just push the new `data/schedule.json` to that location and every
-   installed app will offer the update on its next launch.
+5. Publish: copy `data/schedule.json` into the folder mounted over `data/` on
+   the server (see *Docker*). No new image and no `APP_VERSION` bump. Every
+   installed app takes it on its next open, or within half an hour of being
+   brought back to the screen.
 
 No flags are normally needed: `--version` defaults to the creation date in the
 PDF footer, and `--valid-from` / `--valid-to` to the «ΩΡΟΛΟΓΙΟ ΠΡΟΓΡΑΜΜΑ ΑΠΟ
@@ -178,9 +186,18 @@ Set one constant at the top of `app.js`:
 const REMOTE_SCHEDULE_URL = 'https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json';
 ```
 
-The app then compares that file's `version` / `generatedAt` against what it has
-cached, and shows a «Νέο πρόγραμμα» banner when something newer appears. The
-student taps to apply it — the timetable never changes underneath them mid-look.
+(It is `data/schedule.json` on the app's own server by default, which is what
+the mounted folder above serves.) The app compares that file's `version` /
+`generatedAt` against what it has cached, and when something newer appears it
+takes it on its own, with one line saying so: «Ήρθε νέο πρόγραμμα — ισχύει από
+16 Νοε.», or «Το πρόγραμμα διορθώθηκε.» for a corrected import of the same
+version. It used to wait behind an «Ενημέρωση» tap, and a timetable that waits
+on a tap is one a student walks to the wrong room by. It never lands under a
+sheet the student has open or while they are editing their week: it waits for
+the next minute's tick, a return to the app, or the next open. The red
+«ίσχυε έως» popup does not hold it back, since a new timetable is what clears
+it, and at startup that popup waits up to 4 s for the check to come back, so it
+does not flash up a second before the timetable that answers it.
 A payload that fails validation is refused and the last good schedule is kept;
 one without a `version` or a `generatedAt` counts as failing, since those two
 are how the next one is recognised as newer. Another host also has to be
@@ -201,12 +218,23 @@ gives the answer, throttle or not. Each answer replaces the one before, so
 «Δεν έγινε έλεγχος — δεν υπάρχει σύνδεση» never stays up beside the «Νέο
 πρόγραμμα» or «ενημερωμένο» that came after it.
 
-Both update banners — «Νέο πρόγραμμα» and «Νέα έκδοση της εφαρμογής» — come
-back on every open until tapped. The downloaded schedule is kept aside
-(`gel7.pending.v1`) so it is offered again straight away, offline too, rather
-than only when the next half-hourly check comes round; and an app version that
-finished installing on an earlier visit is offered from `reg.waiting`, since the
-browser never fires `updatefound` for it a second time.
+A schedule found while the student was busy is kept aside (`gel7.pending.v1`),
+so it goes in at the next chance, offline too, rather than only when the next
+half-hourly check comes round.
+
+A new version of the app updates itself too, with no banner. The browser
+downloads it in the background; it takes over when the student switches away
+from the app, the one moment a reload cannot cost them anything, or at the next
+open if it is still waiting then (`reg.waiting`, since the browser never fires
+`updatefound` for it a second time). Not with a sheet left open or in edit
+mode, which a reload would throw away. Not from a page that is unloading
+either: leaving fires the same «hidden», and a hand-over then lands while the
+next page loads, which starts on the old version and never reloads. The same
+half-hourly check also asks the browser to look for a new `sw.js`, since an
+installed app brought back from the background loads no page of its own.
+
+Banners sit in the sticky top bar, above the app bar. They push it down rather
+than cover it, and take over the safe-area padding at the top of the screen.
 
 ---
 
@@ -218,7 +246,7 @@ app.css                   mobile-first styles, light + dark, safe-area aware
 app.js                    picker, merge, own changes, friends, live highlighting, update checks, themes
 sw.js                     service worker — cache-first shell, network-first data
 manifest.webmanifest
-data/schedule.json        the only file that changes per revision
+data/schedule.json        the only file that changes per revision (mounted on the server)
 data/report.txt           import report, regenerated with the data
 icons/                    generated PNG icon set
 tools/pdf2schedule.py     PDF → schedule.json
@@ -470,19 +498,14 @@ changes are dropped, because there is no saved choice of groups to check them
 against. A change saved against a different timetable stamp is still ignored on
 load, so nothing bypasses this check.
 
-The student is told what happened before and after, so that ✎ marks surviving
-an update, or vanishing from some hours only, don't look like a bug:
-
-- **Before**, the «Νέο πρόγραμμα» banner says what the update will do: «Οι
-  αλλαγές σου μένουν, γιατί οι ώρες τους δεν αλλάζουν», «Μία από τις αλλαγές
-  σου θα σβηστεί, γιατί αλλάζει η ώρα της — θα σου δείξουμε ποια. Οι υπόλοιπες
-  μένουν», or that all of them go. That also keeps the update from being put
-  off to hold on to them.
-- **After**, «Ήρθε νέο πρόγραμμα» (or «Το πρόγραμμα διορθώθηκε») says the same in
-  the past tense. When something was dropped, the banner offers «Δες τες»,
-  which opens edit mode with the dropped changes listed, each with what its hour
-  holds now («στο νέο πρόγραμμα: Μαθηματικά», «…: αίθουσα 12»), and «Οι
-  υπόλοιπες κρατήθηκαν» when some stayed.
+The student is told what happened to them, so that ✎ marks surviving an
+update, or vanishing from some hours only, don't look like a bug. «Ήρθε νέο
+πρόγραμμα» (or «Το πρόγραμμα διορθώθηκε») says that the changes stayed, that
+one went because its hour is different now, or that all of them went. When
+something was dropped, the banner offers «Δες τες», which opens edit mode with
+the dropped changes listed, each with what its hour holds now («στο νέο
+πρόγραμμα: Μαθηματικά», «…: αίθουσα 12»), and «Οι υπόλοιπες κρατήθηκαν» when
+some stayed. This line takes the place of the plain «Ήρθε νέο πρόγραμμα».
 
 The list is saved (`gel7.recall.v1`), so it survives the app being closed
 before it was looked at. It goes when edit mode is left with «Τέλος», or when
@@ -591,8 +614,11 @@ One more checks the `<head>` script's hash against the one `docker/default.conf`
 The own-changes cases check that a change only goes over the lesson it was made
 against, is dropped with the timetable it was made on, keeps a half's teacher
 and room, and is undone by choosing the timetable's own lesson. They also check
-that a tap does nothing outside edit mode, and that a new timetable warns before
-wiping the changes and then asks for them back.
+that a tap does nothing outside edit mode, and that a new timetable says what it
+did to the changes and then asks for them back. The update cases check that a
+new timetable comes in on its own with one line, waits out edit mode, and that
+the «ίσχυε έως» popup waits on the startup check; and that a new app version is
+not handed over in edit mode, from an unloading page, or on a first install.
 
 `tools/test/make_fixtures.py` builds the schedule variants used to exercise the
 update path by hand (a newer revision, one that drops a track, one that introduces

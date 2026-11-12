@@ -7,6 +7,8 @@ services:
     # HTTPS, so do not expose this port to students directly.
     ports:
       - "127.0.0.1:8080:80"
-    # Publish a new schedule without rebuilding:
+    # Publish a new schedule without rebuilding: copy it into ./data (as a
+    # .tmp, then mv over schedule.json). The folder is mounted, not the file —
+    # a file mount pins the old copy, and the rename would never show up.
     # volumes:
-    #   - ./data/schedule.json:/usr/share/nginx/html/data/schedule.json:ro
+    #   - ./data:/usr/share/nginx/html/data:ro

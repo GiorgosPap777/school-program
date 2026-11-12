@@ -426,13 +426,25 @@ table.grid td.is-changed .grid__subject::after { content: " ✎"; color: var(--a
 
 /* ---------------------------------------------------------------- banners */
 
+/* Inside .topbar, above the app bar, so banners and bar stick as one block.
+   They used to stick on their own at top: 0, on top of the bar: after a
+   scroll, a tap on ⚙ hit a banner's ✕ and a tap on «Φίλοι» its button.
+   Whichever comes first sits under the phone's status bar, so the safe-area
+   strip goes to the banners while there are any, and to the bar otherwise. */
 .banners {
-  position: sticky; top: 0; z-index: 30;
   display: flex; flex-direction: column;
+}
+.banners:not(:empty) {
+  padding-top: var(--safe-top);
+  background: var(--status-strip, var(--bar));
+}
+.banners:not(:empty) + .app-bar {
+  padding-top: 8px;
+  background: var(--bar);
 }
 .banner {
   display: flex; align-items: center; gap: 10px;
-  padding: calc(var(--safe-top) + 10px) var(--pad) 10px;
+  padding: 10px var(--pad);
   background: var(--accent-soft);
   color: var(--text);
   font-size: .88rem;

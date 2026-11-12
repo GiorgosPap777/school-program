@@ -315,6 +315,75 @@ await test('status card: the right headline at each point of the day', async () 
   }
 });
 
+/** The day list for `selection` on `dayIdx` at a local time, as the today tab
+    draws it: the rows (li elements) in order. */
+function dayRows(schedule, selection, dayIdx, iso) {
+  const list = document.getElementById('todayList');
+  list.children.length = 0;
+  state.schedule = schedule;
+  state.selection = selection;
+  const built = app('buildGrid')(schedule, selection);
+  state.grid = built.grid;
+  state.baseGrid = built.grid;
+  state.marks = new Map();
+  state.editing = false;
+  app('renderDayList')(list, dayIdx, app('clockStatus')(schedule, new Date(iso)), false);
+  return list.children;
+}
+const taggedHours = (rows, tag) => rows
+  .map((li, i) => (li.innerHTML.includes(`tag--${tag}`) ? i + 1 : 0)).filter(Boolean);
+
+await test('the list agrees with the card: no «Τώρα» before the first lesson, «Επόμενο» on the next one', async () => {
+  // Monday in TINY: nothing 1st, Ιστορία 2nd, free 3rd, Φυσική 4th. The card
+  // said «Πριν το πρώτο μάθημα» at 08:20 while the 1st row said «Κενό · Τώρα»,
+  // and «Επόμενο» went missing whenever the next hour was a free one.
+  const cases = [
+    // [time, hours tagged «Τώρα», hours tagged «Επόμενο»]
+    ['2026-10-05T07:30', [], [2]],
+    ['2026-10-05T08:20', [], [2]],
+    ['2026-10-05T09:10', [2], [4]],
+    ['2026-10-05T09:50', [], [4]],
+    ['2026-10-05T10:00', [3], [4]],
+    ['2026-10-05T11:00', [4], []],
+  ];
+  for (const [iso, now, next] of cases) {
+    const rows = dayRows(TINY, X1, 0, iso);
+    assert.deepEqual(taggedHours(rows, 'now'), now, `«Τώρα» at ${iso}`);
+    assert.deepEqual(taggedHours(rows, 'next'), next, `«Επόμενο» at ${iso}`);
+  }
+  const rows = dayRows(TINY, X1, 0, '2026-10-05T08:20');
+  assert.ok(rows[0].innerHTML.includes('Δεν έχεις μάθημα'), 'the hour before the first lesson is called «Κενό»');
+  assert.ok(rows[0].innerHTML.includes('ξεκινάς 2η ώρα, στις 09:00'), 'it does not say when to come in');
+  assert.ok(rows[2].innerHTML.includes('>Κενό<'), 'a free hour mid-day stopped being «Κενό»');
+});
+
+await test('in the real timetable, the list never contradicts the card', async () => {
+  // Every pickable selection, every school day, every 5 minutes of the morning.
+  const days = SCHEDULE.days.length;
+  let checked = 0;
+  for (const sel of everySelection(SCHEDULE)) {
+    for (let d = 0; d < days; d++) {
+      const date = new Date('2026-10-05T07:00');   // a Monday
+      date.setDate(date.getDate() + d);
+      for (let m = 0; m <= 7 * 60; m += 5) {
+        const at = new Date(date.getTime() + m * 60000);
+        const iso = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-`
+          + `${String(at.getDate()).padStart(2, '0')}T${String(at.getHours()).padStart(2, '0')}:`
+          + `${String(at.getMinutes()).padStart(2, '0')}`;
+        const head = headline(SCHEDULE, sel, iso);
+        if (!['Πριν το πρώτο μάθημα', 'Κενό', 'Διάλειμμα'].includes(head)) continue;
+        const rows = dayRows(SCHEDULE, sel, d, iso);
+        if (head === 'Πριν το πρώτο μάθημα') {
+          assert.deepEqual(taggedHours(rows, 'now'), [], `${describe(sel)} at ${iso}: «Τώρα» before the first lesson`);
+        }
+        assert.equal(taggedHours(rows, 'next').length, 1, `${describe(sel)} at ${iso}: «${head}» with no single «Επόμενο»`);
+        checked++;
+      }
+    }
+  }
+  assert.ok(checked > 0, 'no free moment was checked at all');
+});
+
 await test('an hour of a group not picked yet says what it is', async () => {
   // TINY plus one orientation (Monday 3rd) and one κόντρα (Tuesday 2nd).
   const ORIENTED = {
@@ -886,8 +955,9 @@ function laterLab(edit, version = 'lab2') {
 }
 
 /** Two changes on LAB — Monday's Φυσική in another room, Wednesday's Ιστορία
-    made free — then `next` offered and taken. What each banner said. */
-function updateWith(next) {
+    made free — then `next` found by an update check, which takes it on its
+    own. What the banner about the changes said. */
+async function updateWith(next) {
   const shown = document.getElementById('banners').children;
   const text = (id) => (shown.find((b) => b.dataset.banner === id) || {}).innerHTML || '';
   storage.clear();
@@ -900,19 +970,17 @@ function updateWith(next) {
     '2-1': { free: true, was: 'Ιστορία' },
   } };
   app('storeChanges')();
-  app('offerSchedule')(next);
-  const before = text('newdata');
-  shown.length = 0;
-  app('applySchedule')(next);
+  sandbox.fetch = async () => new Response(JSON.stringify(next), { status: 200 });
+  await app('checkForUpdate')({ silent: true, throttled: false });
   vm.runInContext('clearTimeout(tickTimer)', sandbox);
-  return { before, after: text('changes'), shown };
+  assert.equal(state.schedule.version, next.version, 'the new timetable was not taken');
+  return { after: text('changes'), shown };
 }
 const keptKeys = () => Object.keys(state.changes.Χ1 || {}).sort();
 
 await test('a new timetable keeps a change whose hour it leaves as it was, and says so', async () => {
   const next = laterLab();
-  const { before, after } = updateWith(next);
-  assert.match(before, /Οι αλλαγές σου μένουν, γιατί οι ώρες τους δεν αλλάζουν/);
+  const { after } = await updateWith(next);
   assert.match(after, /^<p>Ήρθε νέο πρόγραμμα\. Οι αλλαγές σου κρατήθηκαν, γιατί οι ώρες τους έμειναν ίδιες/);
   assert.deepEqual(keptKeys(), ['0-1', '2-1']);
   // Stored against the new timetable, so the next start still has them.
@@ -927,8 +995,7 @@ await test('a new timetable keeps a change whose hour it leaves as it was, and s
 
 await test('a new timetable drops only the changes whose hour is different now, and says why', async () => {
   const next = laterLab((lessons) => { lessons.find((l) => l.subject === 'Ιστορία').subject = 'Μαθηματικά'; });
-  const { before, after, shown } = updateWith(next);
-  assert.match(before, /Μία από τις αλλαγές σου θα σβηστεί, γιατί αλλάζει η ώρα της — θα σου δείξουμε ποια\. Οι υπόλοιπες μένουν/);
+  const { after, shown } = await updateWith(next);
   assert.match(after, /^<p>Ήρθε νέο πρόγραμμα\. Μία αλλαγή σου σβήστηκε, γιατί η ώρα της είναι πια διαφορετική· οι υπόλοιπες κρατήθηκαν/);
   assert.deepEqual(keptKeys(), ['0-1']);
   const reminder = [{ when: 'Τετάρτη 1η', what: 'Κενό', how: 'αντί για Ιστορία', now: 'στο νέο πρόγραμμα: Μαθηματικά' }];
@@ -960,8 +1027,7 @@ await test('a correction that moves a teacher or a room drops what was made on i
     lessons.find((l) => l.d === 0 && l.p === 1).teacher = 'Νικολάου';
     lessons.find((l) => l.subject === 'Ιστορία').room = 'ΕΦ';
   }, LAB.version);
-  const { before, after, shown } = updateWith(next);
-  assert.match(before, /Οι ώρες που είχες αλλάξει αλλάζουν, οπότε οι αλλαγές σου θα σβηστούν — θα σου δείξουμε ποιες ήταν/);
+  const { after, shown } = await updateWith(next);
   assert.match(after, /^<p>Το πρόγραμμα διορθώθηκε\. Οι ώρες που είχες αλλάξει είναι πια διαφορετικές/);
   assert.deepEqual({ ...state.changes }, {});
   assert.equal(storage.has(app('KEY_CHANGES')), false);
@@ -977,7 +1043,7 @@ await test('a correction that moves a teacher or a room drops what was made on i
 
 await test('«Δες τες» opens edit mode on the reminder; with no changes nothing is said about them', async () => {
   const next = laterLab((lessons) => { lessons.forEach((l) => { l.subject += ' Ι'; }); });
-  const { shown } = updateWith(next);
+  const { shown } = await updateWith(next);
   const bar = shown.find((b) => b.dataset.banner === 'changes');
   bar.children.find((c) => c.className === 'banner__act').on.click();
   assert.equal(state.editing, true);
@@ -985,12 +1051,151 @@ await test('«Δες τες» opens edit mode on the reminder; with no changes n
   assert.doesNotMatch(document.getElementById('editRecall').innerHTML, /υπόλοιπες/);
   app('setEditing')(false);
   vm.runInContext('clearTimeout(tickTimer)', sandbox);
-  // Nothing to warn about without changes.
+  // Without changes there is nothing to say about them, only that it came.
   shown.length = 0;
   state.changes = {};
-  app('offerSchedule')(laterLab(null, 'lab3'));
+  app('applySchedule')(laterLab(null, 'lab3'));
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  assert.deepEqual(shown.map((b) => b.dataset.banner), ['newdata']);
   assert.doesNotMatch(shown[0].innerHTML, /αλλαγές/);
   shown.length = 0;
+  storage.clear();
+});
+
+await test('a new timetable comes in on its own, and says so once', async () => {
+  // It used to wait behind «Ενημέρωση» — and a student who never tapped it
+  // walked to Monday's rooms with last week's timetable.
+  const shown = document.getElementById('banners').children;
+  const text = () => shown.map((b) => b.innerHTML).join(' | ');
+  storage.clear();
+  shown.length = 0;
+  Object.assign(state, { schedule: JSON.parse(JSON.stringify(LAB)), selection: LAB_SEL,
+    changes: {}, recall: null, editing: false });
+  const next = { ...laterLab(), validFrom: '2026-11-16', validTo: '2026-11-20' };
+  sandbox.fetch = async () => new Response(JSON.stringify(next), { status: 200 });
+  await app('checkForUpdate')({ silent: true });
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  assert.equal(state.schedule.version, 'lab2');
+  assert.equal(JSON.parse(storage.get(app('KEY_SCHEDULE'))).version, 'lab2', 'not kept for the next open');
+  assert.equal(storage.has(app('KEY_PENDING')), false, 'still pending after it was taken');
+  assert.deepEqual(shown.map((b) => b.dataset.banner), ['newdata']);
+  assert.equal(shown[0].children.length, 1, 'a button to tap besides ✕');
+  assert.match(text(), /^<p>Ήρθε νέο πρόγραμμα — ισχύει από 16 Νοε\.<\/p>$/);
+
+  // The same version again, corrected: not «νέο».
+  shown.length = 0;
+  const fixed = { ...next, generatedAt: '2099-01-02T00:00:00Z' };
+  sandbox.fetch = async () => new Response(JSON.stringify(fixed), { status: 200 });
+  await app('checkForUpdate')({ silent: true, throttled: false });
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  assert.equal(state.schedule.generatedAt, fixed.generatedAt);
+  assert.match(text(), /^<p>Το πρόγραμμα διορθώθηκε\.<\/p>$/);
+
+  // A tap on «Ενημέρωση» waved away in an older version does not hold it back.
+  shown.length = 0;
+  storage.set('gel7.dismissed.v1', JSON.stringify(`lab3|2099-01-03T00:00:00Z`));
+  const third = { ...next, version: 'lab3', generatedAt: '2099-01-03T00:00:00Z' };
+  sandbox.fetch = async () => new Response(JSON.stringify(third), { status: 200 });
+  await app('checkForUpdate')({ silent: true, throttled: false });
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  assert.equal(state.schedule.version, 'lab3');
+  assert.equal(storage.has('gel7.dismissed.v1'), false, 'the old stamp was left behind');
+  shown.length = 0;
+  storage.clear();
+});
+
+await test('a new timetable waits while the student is editing, then comes in', async () => {
+  const shown = document.getElementById('banners').children;
+  storage.clear();
+  shown.length = 0;
+  Object.assign(state, { schedule: JSON.parse(JSON.stringify(LAB)), selection: LAB_SEL,
+    changes: {}, recall: null, editing: true });
+  const next = laterLab();
+  sandbox.fetch = async () => new Response(JSON.stringify(next), { status: 200 });
+  await app('checkForUpdate')({ silent: true, throttled: false });
+  assert.equal(state.schedule.version, 'lab', 'swapped out from under edit mode');
+  assert.deepEqual(shown.map((b) => b.dataset.banner), []);
+  assert.equal(JSON.parse(storage.get(app('KEY_PENDING'))).version, 'lab2', 'and then lost');
+  // Edit mode over, the next return to the app takes it — offline too.
+  state.editing = false;
+  sandbox.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  app('wire')();
+  document.visibilityState = 'visible';
+  await listeners.document.visibilitychange();
+  vm.runInContext('clearTimeout(tickTimer)', sandbox);
+  delete document.visibilityState;
+  assert.equal(state.schedule.version, 'lab2');
+  assert.deepEqual(shown.map((b) => b.dataset.banner), ['newdata']);
+  assert.equal(storage.has(app('KEY_PENDING')), false);
+  shown.length = 0;
+  storage.clear();
+});
+
+await test('a new version of the app takes over on its own, but not from under a sheet or a page unloading', async () => {
+  const posted = [];
+  sandbox.navigator.serviceWorker = { controller: {} };
+  vm.runInContext('swReg = { waiting: { postMessage: (m) => __posted.push(m) } }', Object.assign(sandbox, { __posted: posted }));
+  const take = app('takeAppUpdate');
+  Object.assign(state, { editing: true });
+  take();
+  assert.equal(posted.length, 0, 'taken in edit mode, which a reload would throw away');
+  state.editing = false;
+  vm.runInContext('leaving = true', sandbox);
+  take();
+  assert.equal(posted.length, 0, 'taken while the page unloads, stranding the next one on the old version');
+  vm.runInContext('leaving = false', sandbox);
+  sandbox.navigator.serviceWorker.controller = null;
+  take();
+  assert.equal(posted.length, 0, 'taken on a first install, which has nothing to replace');
+  sandbox.navigator.serviceWorker.controller = {};
+  // Switching away is what hands it over.
+  app('wire')();
+  document.visibilityState = 'hidden';
+  listeners.document.visibilitychange();
+  delete document.visibilityState;
+  assert.deepEqual(posted.map((m) => m.type), ['SKIP_WAITING']);
+  // With nothing waiting, nothing to do.
+  vm.runInContext('swReg = null', sandbox);
+  take();
+  assert.equal(posted.length, 1);
+  delete sandbox.navigator.serviceWorker;
+  delete sandbox.__posted;
+});
+
+await test('the ended-timetable popup waits on the check at startup, and shows if it finds nothing', async () => {
+  // Opening the app on Monday morning: last week's timetable has ended, and
+  // the check a moment later brings this week's. A red popup counting down
+  // in between, then vanishing, reads as a glitch.
+  const alert = document.getElementById('staleAlert');
+  let popped = 0;
+  alert.showModal = () => { popped++; alert.open = true; };
+  alert.close = () => { alert.open = false; };
+  const ended = { ...SCHEDULE, version: '2020-01-02', generatedAt: '2020-01-03T00:00:00Z',
+    validFrom: '2020-01-06', validTo: '2020-01-10' };
+  const current = { ...ended, version: '2099-01-01', generatedAt: '2099-01-01T00:00:00Z',
+    validFrom: '2020-01-13', validTo: '2099-12-31' };
+  const sel = selections.find((x) => !x.extras.length);
+  const boot = async (answer) => {
+    storage.clear();
+    document.getElementById('banners').children.length = 0;
+    storage.set(app('KEY_SCHEDULE'), JSON.stringify(ended));
+    storage.set(app('KEY_SELECTION'), JSON.stringify(sel));
+    Object.assign(state, { schedule: null, selection: null, editing: false });
+    sandbox.fetch = answer;
+    popped = 0;
+    alert.open = false;
+    await app('start')();
+    await new Promise((r) => setTimeout(r, 20));
+    vm.runInContext('clearTimeout(tickTimer); clearTimeout(staleTimer)', sandbox);
+  };
+  await boot(async () => new Response(JSON.stringify(current), { status: 200 }));
+  assert.equal(state.schedule.version, '2099-01-01');
+  assert.equal(popped, 0, 'the popup flashed up before the new timetable');
+  await boot(async () => new Response(JSON.stringify(ended), { status: 200 }));
+  assert.equal(popped, 1, 'with nothing newer, the popup never came');
+  await boot(async () => { throw new TypeError('Failed to fetch'); });
+  assert.equal(popped, 1, 'offline, the popup never came');
+  alert.open = false;
   storage.clear();
 });
 

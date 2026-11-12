@@ -7,7 +7,7 @@
 
 /* -------------------------------------------------------------- configuration */
 
-const APP_VERSION = '1.16.2';
+const APP_VERSION = '1.17.0';
 
 /* Where to look for a newer schedule. Point this at a raw file URL (e.g.
    https://raw.githubusercontent.com/<user>/<repo>/main/data/schedule.json) when
@@ -25,6 +25,9 @@ const KEY_STALE_ACK = 'gel7.staleack.v1';
 /* The popup's button waits this long before it takes a tap, so a student
    reads at least its title instead of tapping it away on reflex. */
 const STALE_ACK_DELAY_MS = 2000;
+// How long the «ίσχυε έως» popup waits on the check made at startup, which
+// may well bring the timetable that replaces the ended one.
+const STALE_HOLD_MS = 4000;
 const KEY_LAST_CHECK = 'gel7.lastcheck.v1';
 const KEY_PENDING = 'gel7.pending.v1';
 const KEY_CHANGES = 'gel7.changes.v1';
@@ -812,12 +815,25 @@ function clockStatus(schedule, date) {
   return { schoolDay: true, dayIdx: di, mins, bounds, current, next };
 }
 
-/** Per-slot label used by both the day list and the week grid. */
-function slotStatus(status, dayIdx, periodIdx) {
+/** Per-slot label used by both the day list and the week grid. Given the
+    day's row, it follows the student's lessons rather than the bell: an hour
+    before their first lesson is never «Τώρα» (they have not arrived yet —
+    the card already says «Πριν το πρώτο μάθημα»), and «Επόμενο» is their next
+    lesson even when a free hour comes before it. */
+function slotStatus(status, dayIdx, periodIdx, row) {
   if (!status.schoolDay || dayIdx !== status.dayIdx) return 'idle';
-  if (periodIdx === status.current) return 'now';
-  if (periodIdx === status.next) return 'next';
-  return status.bounds[periodIdx].end <= status.mins ? 'past' : 'idle';
+  const past = status.bounds[periodIdx].end <= status.mins;
+  if (!row) {
+    if (periodIdx === status.current) return 'now';
+    if (periodIdx === status.next) return 'next';
+    return past ? 'past' : 'idle';
+  }
+  const first = row.findIndex(Boolean);
+  if (periodIdx === status.current) return first >= 0 && periodIdx < first ? 'idle' : 'now';
+  const from = status.current >= 0 ? status.current + 1 : status.next;
+  const nextLesson = from >= 0 ? row.findIndex((lesson, i) => i >= from && lesson) : -1;
+  if (periodIdx === nextLesson) return 'next';
+  return past ? 'past' : 'idle';
 }
 
 /* -------------------------------------------------------------------- render */
@@ -994,10 +1010,14 @@ function renderDayList(target, dayIdx, status, withHeading, week = myWeek()) {
     return;
   }
 
+  // Hours before the first lesson are not a «Κενό»: a free hour means sitting
+  // at school, and before the first lesson the student has not come in yet.
+  const first = row.findIndex(Boolean);
   for (let p = 0; p <= last; p++) {
     const lesson = row[p];
     const period = state.schedule.periods[p];
-    const kind = slotStatus(status, dayIdx, p);
+    const kind = slotStatus(status, dayIdx, p, row);
+    const beforeFirst = !lesson && first > p;
     const classes = ['slot'];
     if (!lesson) classes.push('slot--free');
     if (kind === 'past') classes.push('slot--past');
@@ -1044,6 +1064,12 @@ function renderDayList(target, dayIdx, status, withHeading, week = myWeek()) {
         : 'δεν έχεις διαλέξει ομάδα'}</p>`;
     }
 
+    // Said once, on the first of those hours: when to be there.
+    if (beforeFirst && p === 0) {
+      instead += `<p class="slot__instead">${week.friend ? 'ξεκινά' : 'ξεκινάς'}`
+        + ` ${first + 1}η ώρα, στις ${state.schedule.periods[first].start}</p>`;
+    }
+
     // The student's own change: always said, so it is never taken for the
     // school's timetable — by them months later, or by whoever they show it to.
     const mark = week.marks.get(hourKey(dayIdx, p + 1));
@@ -1064,7 +1090,8 @@ function renderDayList(target, dayIdx, status, withHeading, week = myWeek()) {
         <span class="slot__time">${period.start}<span>${period.end}</span></span>
       </div>
       <div class="slot__body">
-        <p class="slot__subject">${esc(lesson ? lesson.subject : 'Κενό')}</p>
+        <p class="slot__subject">${esc(lesson ? lesson.subject
+          : beforeFirst ? (week.friend ? 'Δεν έχει μάθημα' : 'Δεν έχεις μάθημα') : 'Κενό')}</p>
         ${meta.length ? `<p class="slot__meta">${meta.map((m) => `<span>${m}</span>`).join('')}</p>` : ''}
         ${instead}${tag}${clash}
       </div>`;
@@ -1199,7 +1226,9 @@ function renderStaleAlert(date) {
     return;
   }
   // Never on top of a sheet the student is busy in; it waits for the next render.
-  if (alert.open || document.querySelector('dialog[open]')) return;
+  // Nor while the check made at startup is out: a popup that counts down only
+  // to vanish when the new timetable lands a second later reads as a glitch.
+  if (staleHeld || alert.open || document.querySelector('dialog[open]')) return;
   $('staleText').textContent = `Αυτό το πρόγραμμα ίσχυε μόνο έως ${formatDay(state.schedule.validTo)}.`
     + ' Οι ώρες που βλέπεις μπορεί να έχουν αλλάξει — έλεγξε με το σχολείο.'
     + ' Μόλις βγει το νέο πρόγραμμα, θα σου το πούμε.';
@@ -1208,6 +1237,7 @@ function renderStaleAlert(date) {
 }
 
 let staleTimer = null;
+let staleHeld = false;
 
 /** The wait on «Κατάλαβα» has to look like a wait. A button that just ignores
     taps reads as a frozen app, so it counts down in its own label — «Κατάλαβα
@@ -2440,6 +2470,9 @@ async function checkForUpdate({ silent, throttled = silent }) {
     if (Date.now() - last < CHECK_INTERVAL_MS) return;
   }
   checking = true;
+  // The app itself, too. An installed app brought back from the background
+  // loads no page, so the browser has no reason of its own to look.
+  if (swReg) swReg.update().catch(() => {});
   try {
     const candidate = await fetchSchedule(REMOTE_SCHEDULE_URL, { fresh: true });
     save(KEY_LAST_CHECK, Date.now());
@@ -2450,9 +2483,11 @@ async function checkForUpdate({ silent, throttled = silent }) {
       if (!silent) banner({ id: 'uptodate', text: 'Το πρόγραμμα είναι ενημερωμένο.' });
       return;
     }
-    if (load(KEY_DISMISSED, null) === stamp(candidate)) return;
+    // Taken straight away, not offered: a timetable that waits on a tap is
+    // one a student walks to the wrong room by. Kept as pending first, so one
+    // found while a sheet is open still comes in once it is closed.
     save(KEY_PENDING, candidate);
-    offerSchedule(candidate);
+    applyPendingSchedule();
   } catch (err) {
     if (err.kind === 'data') {
       // A broken published file is worth surfacing even on a background check:
@@ -2473,58 +2508,31 @@ async function checkForUpdate({ silent, throttled = silent }) {
   }
 }
 
-function offerSchedule(candidate) {
-  // Same version stamp, newer file: the school's timetable has not changed,
-  // the import of it has been corrected. Saying «νέο πρόγραμμα» next to a
-  // version the student can already see in the footer just reads as a bug.
-  const corrected = String(candidate.version) === String(state.schedule.version);
-  // Said before the tap, not only after: what the update does to the
-  // student's changes. And said so the tap is not put off for their sake —
-  // what goes is shown again, and an old timetable kept to hold on to it is
-  // far worse.
-  const had = state.selection ? classChanges(state.selection.section) : {};
-  let losing = '';
-  if (Object.keys(had).length) {
-    const { rows, keptRows } = carryChanges(had, { schedule: state.schedule, selection: state.selection },
-      { schedule: candidate, selection: pruneSelection(state.selection, candidate) });
-    if (!rows.length) {
-      losing = ' Οι αλλαγές σου μένουν, γιατί οι ώρες τους δεν αλλάζουν.';
-    } else if (!keptRows) {
-      losing = ' Οι ώρες που είχες αλλάξει αλλάζουν, οπότε οι αλλαγές σου θα σβηστούν —'
-        + ' θα σου δείξουμε ποιες ήταν.';
-    } else if (rows.length === 1) {
-      losing = ' Μία από τις αλλαγές σου θα σβηστεί, γιατί αλλάζει η ώρα της —'
-        + ' θα σου δείξουμε ποια. Οι υπόλοιπες μένουν.';
-    } else {
-      losing = ` ${rows.length} από τις αλλαγές σου θα σβηστούν, γιατί αλλάζουν οι ώρες τους —`
-        + ' θα σου δείξουμε ποιες. Οι υπόλοιπες μένουν.';
-    }
-  }
-  banner({
-    id: 'newdata',
-    text: (corrected
-      ? 'Διορθωμένο πρόγραμμα — υπάρχει ενημερωμένη έκδοση των ίδιων ωρών.'
-      : `Νέο πρόγραμμα (έκδοση ${candidate.version}).`) + losing,
-    actionText: 'Ενημέρωση',
-    onAction: () => applySchedule(candidate),
-  });
-}
-
-/** A newer schedule found on an earlier visit and not taken yet. Offered again
-    on every open, offline too — otherwise closing the app without tapping the
-    banner hides it until the next background check is due. */
-function offerPendingSchedule() {
+/** A newer schedule found and not in use yet. It goes in on its own — but
+    not under a sheet the student has open, or while they are editing their
+    week: then it waits for the next minute's tick, a return to the app, or
+    the next open, whichever comes first. Offline too: it is already here. */
+function applyPendingSchedule() {
   const raw = load(KEY_PENDING, null);
-  if (!raw) return;
+  if (!raw || !state.schedule) return;
   let pending = null;
   try {
     pending = validateSchedule(raw);
   } catch (err) { /* fall through and drop it */ }
-  if (!pending || !isNewer(pending, state.schedule) || load(KEY_DISMISSED, null) === stamp(pending)) {
+  if (!pending || !isNewer(pending, state.schedule)) {
     localStorage.removeItem(KEY_PENDING);
     return;
   }
-  offerSchedule(pending);
+  if (busy()) return;
+  applySchedule(pending);
+}
+
+/** Something the student is in the middle of — a sheet open, or edit mode
+    on — which neither a new timetable nor a reload of the app should pull
+    out from under them. The red «ίσχυε έως» popup does not count: a new
+    timetable is the very thing that answers it. */
+function busy() {
+  return Boolean(state.editing || document.querySelector('dialog[open]:not(#staleAlert)'));
 }
 
 function applySchedule(schedule) {
@@ -2535,13 +2543,21 @@ function applySchedule(schedule) {
   // while there still is one.
   const old = state.schedule;
   const oldSelection = state.selection;
+  const lead = String(schedule.version) === String(old.version)
+    ? 'Το πρόγραμμα διορθώθηκε' : 'Ήρθε νέο πρόγραμμα';
+  // Nothing picked yet: nothing to carry over, and no class that «changed».
+  if (!oldSelection) {
+    state.schedule = schedule;
+    save(KEY_SCHEDULE, schedule);
+    localStorage.removeItem(KEY_PENDING);
+    banner({ id: 'newdata', text: scheduleNote(schedule, lead) });
+    return;
+  }
   const had = oldSelection ? classChanges(oldSelection.section) : {};
   const pruned = pruneSelection(oldSelection, schedule);
   const carried = Object.keys(had).length
     ? carryChanges(had, { schedule: old, selection: oldSelection }, { schedule, selection: pruned })
     : null;
-  const lead = String(schedule.version) === String(old.version)
-    ? 'Το πρόγραμμα διορθώθηκε' : 'Ήρθε νέο πρόγραμμα';
   // With nothing to remind of, a reminder not yet seen from an earlier
   // timetable is kept: those changes have not been put back either.
   if (carried && carried.rows.length) {
@@ -2550,8 +2566,9 @@ function applySchedule(schedule) {
 
   state.schedule = schedule;
   save(KEY_SCHEDULE, schedule);
-  save(KEY_DISMISSED, stamp(schedule));
   localStorage.removeItem(KEY_PENDING);
+  // Left by versions where a new timetable waited on a tap, and could be waved away.
+  localStorage.removeItem(KEY_DISMISSED);
   // Stored again under the new timetable's stamp, or loadChanges() drops them.
   state.changes = carried && Object.keys(carried.kept).length
     ? { [oldSelection.section]: carried.kept } : {};
@@ -2578,8 +2595,18 @@ function applySchedule(schedule) {
     // πρόγραμμα» looks like the app forgot to update.
     banner({ id: 'changes',
       text: `${lead}. Οι αλλαγές σου κρατήθηκαν, γιατί οι ώρες τους έμειναν ίδιες.` });
+  } else {
+    // It came in on its own, so it is said once — or a timetable that moved
+    // a lesson overnight looks like the app got it wrong.
+    banner({ id: 'newdata', text: scheduleNote(schedule, lead) });
   }
   render();
+}
+
+function scheduleNote(schedule, lead) {
+  const from = lead === 'Ήρθε νέο πρόγραμμα' && schedule.validFrom
+    ? ` — ισχύει από ${formatDay(schedule.validFrom)}` : '';
+  return `${lead}${from}.`;
 }
 
 /** The reminder of the changes a new timetable wiped. It stays — across
@@ -2627,25 +2654,30 @@ function loadRecall() {
 
 /* ------------------------------------------------ service worker + install */
 
+let swReg = null;
+// Set while the page is being unloaded — a reload, a link — rather than just
+// put out of sight. That fires the same «hidden» too, and a hand-over then
+// lands in the middle of the next page loading: it starts on the old version,
+// the new one takes over before it is listening, and it never reloads.
+let leaving = false;
+
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
+  // pagehide comes before visibilitychange on the way out.
+  addEventListener('pagehide', () => { leaving = true; });
+  addEventListener('pageshow', () => { leaving = false; });
   navigator.serviceWorker.register('sw.js').then((reg) => {
-    const offer = () => banner({
-      id: 'appupdate',
-      text: 'Νέα έκδοση της εφαρμογής.',
-      actionText: 'Επαναφόρτωση',
-      // Whichever version is waiting by the time of the tap, not the one that
-      // raised the banner — a newer deploy may have replaced it since.
-      onAction: () => { if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' }); },
-    });
-    // A version that finished installing on an earlier visit is already waiting,
-    // and updatefound will not fire for it again.
-    if (reg.waiting && navigator.serviceWorker.controller) offer();
+    swReg = reg;
+    // A version that finished installing on an earlier visit and never took
+    // over. The app has only just opened, so nothing is lost by doing it now.
+    takeAppUpdate();
     reg.addEventListener('updatefound', () => {
       const sw = reg.installing;
       if (!sw) return;
       sw.addEventListener('statechange', () => {
-        if (sw.state === 'installed' && navigator.serviceWorker.controller) offer();
+        // Found while the app is on screen, it waits until the student
+        // switches away; wire() hands it over then.
+        if (sw.state === 'installed' && document.visibilityState === 'hidden') takeAppUpdate();
       });
     });
   }).catch(() => { /* http:// without a secure context — the app still runs */ });
@@ -2662,6 +2694,16 @@ function registerServiceWorker() {
     reloading = true;
     location.reload();
   });
+}
+
+/** A new version of the app, downloaded and waiting, takes over with no
+    banner and no tap: at startup, or once the student has switched away —
+    the moments a reload cannot cost them anything. Not with a sheet left open
+    or edit mode on, which a reload would throw away; then the next time. */
+function takeAppUpdate() {
+  const waiting = swReg && swReg.waiting;
+  if (!waiting || leaving || !navigator.serviceWorker.controller || busy()) return;
+  waiting.postMessage({ type: 'SKIP_WAITING' });
 }
 
 function isIOS() {
@@ -2709,7 +2751,7 @@ function startTicking() {
   clearTimeout(tickTimer);
   const d = new Date();
   const delay = 60000 - (d.getSeconds() * 1000 + d.getMilliseconds()) + 50;
-  tickTimer = setTimeout(() => { render(); startTicking(); }, delay);
+  tickTimer = setTimeout(() => { applyPendingSchedule(); render(); startTicking(); }, delay);
 }
 
 /* ------------------------------------------------------------------- wiring */
@@ -2812,7 +2854,11 @@ function wire() {
   // iOS suspends timers while the app is backgrounded, so the highlight would be
   // stale at exactly the moment a student reopens it. Recompute on every return.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
+    if (document.visibilityState !== 'visible') {
+      takeAppUpdate();
+      return;
+    }
+    applyPendingSchedule();
     render();
     startTicking();
     checkForUpdate({ silent: true });
@@ -2876,6 +2922,12 @@ async function start() {
   state.recall = loadRecall();
   state.friends = loadFriends();
 
+  // Skip the check when the bundle we just fetched *is* the remote file.
+  // Otherwise a cold start always checks, throttle or not: it costs one 304,
+  // and an ended timetable's replacement is likeliest to be found right here.
+  const willCheck = !fetchedRemote;
+  staleHeld = willCheck;
+
   if (!state.selection) {
     openPicker();
   } else {
@@ -2885,13 +2937,15 @@ async function start() {
   setView('today');
   startTicking();
   if (state.recall) offerRecall();
-  offerPendingSchedule();
-  // Skip the check when the bundle we just fetched *is* the remote file.
-  // Otherwise a cold start always checks, throttle or not: it costs one 304,
-  // and it is the first thing that runs after an app update — which an older
-  // version, one that did not keep the schedule it found, may have been asked
-  // for before its «Νέο πρόγραμμα» banner was tapped.
-  if (!fetchedRemote) checkForUpdate({ silent: true, throttled: false });
+  applyPendingSchedule();
+  if (!willCheck) return;
+  const release = () => {
+    if (!staleHeld) return;
+    staleHeld = false;
+    render();
+  };
+  setTimeout(release, STALE_HOLD_MS);
+  checkForUpdate({ silent: true, throttled: false }).finally(release);
 }
 
 /** The views stay where they are, empty, so the moment a schedule arrives
